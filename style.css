@@ -56,3 +56,9 @@ tr.loader td { color: var(--muted); }
 #log .e { color: #ff8b82; } #log .v { color: #7f8b97; } #log .s { color: #7ee787; }
 footer { padding-bottom: 32px; }
 @media (max-width: 560px) { .banner.error { margin-left: 16px; margin-right: 16px; } }
+.plain { display: grid; grid-template-columns: max-content 1fr max-content; gap: 6px 10px; align-items: center; }
+.plain .name { font-family: ui-monospace, monospace; }
+.plain .sel { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plain label.btn { border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.plain input[type=file] { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.plain input[type=file]:focus-visible + span { outline: 2px solid var(--accent); }

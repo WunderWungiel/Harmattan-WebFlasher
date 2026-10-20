@@ -21,7 +21,7 @@
     <div class="row">
       <button id="btn-connect" class="primary">Connect&hellip;</button>
       <button id="btn-wait">Wait for device</button>
-      <button id="btn-identify" disabled>Identify (-i)</button>
+      <button id="btn-identify" disabled>Identify</button>
       <button id="btn-flashmode" disabled title="Sync / PC Suite mode only (ADL reboot)">Reboot to flash mode</button>
       <button id="btn-disconnect" disabled>Disconnect</button>
     </div>
@@ -56,23 +56,26 @@
         <tbody></tbody>
       </table>
     </div>
+    <details id="advanced">
+      <summary>Advanced: individual image files</summary>
+      <p class="muted small">Use a file instead of (or in addition to) the one inside the FIASCO. A supplied file replaces FIASCO images of the same type. <code>ape-algo</code> may be a FIASCO or a plain image.</p>
+      <div id="plain-files" class="plain"></div>
+    </details>
     <p class="muted small">Loader images (<code>2nd</code>, <code>ape-algo</code>) are used automatically to get the phone into flashing mode; they are never flashed. For the N9, load the main FIASCO and the eMMC FIASCO together.</p>
   </section>
 
   <section class="card" id="card-actions">
     <h2><span class="n">3</span> Actions</h2>
     <div class="row">
-      <button id="btn-flash" class="primary" disabled>Flash selected (-f)</button>
+      <button id="btn-flash" class="primary" disabled>Flash selected</button>
       <button id="btn-abort" disabled>Abort</button>
-      <button id="btn-reboot" disabled>Reboot (-R)</button>
-      <button id="btn-boot" disabled title="NOLO only">Boot (-b)</button>
+      <button id="btn-reboot" disabled>Reboot</button>
+      <button id="btn-boot" disabled title="NOLO only">Boot</button>
     </div>
     <div class="opts">
       <label><input type="checkbox" id="opt-reboot" checked> reboot after flashing</label>
-      <label><input type="checkbox" id="opt-nopreserve"> <code>--no-preserve</code> (wipe MMC contents)</label>
+      <label title="Sets /update/mmc/no_preserve: the eMMC is repartitioned and its contents are not preserved. The original tool discourages this; prefer the Erase options."><input type="checkbox" id="opt-nopreserve"> repartition eMMC &mdash; contents are not preserved (<code>--no-preserve</code>)</label>
       <label><input type="checkbox" id="opt-skipbat"> skip battery check</label>
-      <label><input type="checkbox" id="opt-erase-mmc"> erase MMC first</label>
-      <label><input type="checkbox" id="opt-erase-user"> erase user data first</label>
     </div>
     <details>
       <summary>R&amp;D mode</summary>
@@ -91,10 +94,17 @@
     <details>
       <summary>Erase</summary>
       <div class="row">
-        <button id="btn-erase-mmc" disabled>Erase MMC</button>
-        <button id="btn-erase-user" disabled>Erase user data</button>
+        <label>MMC method
+          <select id="erase-method"><option value="secure">secure</option><option value="quick">quick</option></select>
+        </label>
+        <button id="btn-erase-mmc" disabled>Erase MMC now</button>
+        <button id="btn-erase-user" disabled>Erase user data now (secure)</button>
       </div>
-      <p class="muted small">Needs the APE algorithm running; a loaded firmware file containing <code>ape-algo</code> is used to start it.</p>
+      <div class="opts">
+        <label><input type="checkbox" id="opt-erase-mmc"> also erase MMC before flashing (<code>--erase-mmc</code>)</label>
+        <label><input type="checkbox" id="opt-erase-user"> also erase user data before flashing (<code>--erase-user-data=secure</code>)</label>
+      </div>
+      <p class="muted small"><b>MMC</b> erases the eMMC. <b>User data</b> erases the eMMC <i>and swap</i> and resets the device lock, so ticking both erases the MMC twice. Erasing needs the APE algorithm running; a loaded firmware with <code>ape-algo</code> is used to start it.</p>
     </details>
   </section>
 

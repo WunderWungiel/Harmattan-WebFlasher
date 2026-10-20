@@ -1,6 +1,6 @@
 // UI glue. All device logic lives in flasher.js / protocol.js.
 import { Flasher, SU_FLASH_ORDER, Cancelled } from './flasher.js';
-import { parseFiasco, mergeFiascos, describeProducts, verifyImageHash } from './fiasco.js';
+import { parseFiasco, mergeFiascos, describeProducts, verifyImageHash, plainImage, PLAIN_TYPES, pickImage } from './fiasco.js';
 import { WebUsbHost } from './webusb.js';
 import { RD_FLAGS } from './protocol.js';
 
@@ -79,6 +79,7 @@ const flasher = new Flasher(host, { log, progress });
 
 let fiasco = null; // merged
 let files = [];
+const extras = new Map(); // type -> plain image supplied by the user
 let busy = false;
 
 const deviceButtons = ['btn-identify', 'btn-flashmode', 'btn-disconnect', 'btn-reboot', 'btn-boot', 'btn-rd-query', 'btn-rd-on', 'btn-rd-off', 'btn-rd-set', 'btn-rd-clear', 'btn-erase-mmc', 'btn-erase-user'];
@@ -94,6 +95,7 @@ function refresh() {
   $('btn-abort').disabled = !busy;
   $('btn-clear').disabled = !fiasco;
   $('file').disabled = busy;
+  for (const i of document.querySelectorAll('#plain-files input[type=file]')) i.disabled = busy;
   renderDevice();
 }
 
@@ -126,7 +128,7 @@ let lastInfo = null;
 
 async function run(label, fn, { confirmText } = {}) {
   if (busy) return;
-  if (confirmText && !confirm(confirmText)) return;
+  if (confirmText && !confirm(typeof confirmText === 'function' ? confirmText() : confirmText)) return;
   busy = true;
   refresh();
   resetProgress(label);
@@ -202,12 +204,84 @@ $('file').addEventListener('change', async (e) => {
     }
   }
   if (!parsed.length) return;
+  const before = files;
   files = [...files, ...parsed];
-  fiasco = mergeFiascos(files);
+  if (!rebuild()) files = before;
   renderImages();
   refresh();
 });
-$('btn-clear').onclick = () => { files = []; fiasco = null; renderImages(); refresh(); };
+$('btn-clear').onclick = () => { files = []; extras.clear(); fiasco = null; renderPlainFiles(); renderImages(); refresh(); };
+
+/** Merge FIASCO files + individual images; false (and a log line) if the combination is refused. */
+function rebuild() {
+  if (!files.length && !extras.size) { fiasco = null; return true; }
+  try {
+    const m = mergeFiascos(files, [...extras.values()]);
+    for (const w of m.warnings) log(w);
+    fiasco = m;
+    return true;
+  } catch (err) {
+    log(`ERROR: ${err.message}`);
+    return false;
+  }
+}
+
+// ---- Advanced: individual image files (-a -k -L -n -r --cmt-*)
+
+const PLAIN_HELP = {
+  'ape-algo': 'APE algorithm (FIASCO or plain)', kernel: 'kernel', moslo: 'moslo', initfs: 'initfs (only loaded in NOLO mode, not flashed over SU)',
+  rootfs: 'root filesystem', 'cmt-2nd': 'CMT 2nd', 'cmt-algo': 'CMT algorithm', 'cmt-mcusw': 'CMT MCUSW',
+};
+
+function renderPlainFiles() {
+  const box = $('plain-files');
+  box.textContent = '';
+  for (const type of PLAIN_TYPES) {
+    const name = document.createElement('span'); name.className = 'name'; name.textContent = type; name.title = PLAIN_HELP[type];
+    const sel = document.createElement('span'); sel.className = 'sel';
+    const cur = extras.get(type);
+    sel.textContent = cur ? `${cur.source} (${fmtSize(cur.size)})` : PLAIN_HELP[type];
+    const cell = document.createElement('span');
+    const lab = document.createElement('label'); lab.className = 'btn';
+    const input = document.createElement('input'); input.type = 'file'; input.disabled = busy;
+    input.addEventListener('change', async () => {
+      const f = input.files[0];
+      if (f) await addPlain(type, f);
+    });
+    const txt = document.createElement('span'); txt.textContent = cur ? 'Replace…' : 'Choose…';
+    lab.append(input, txt);
+    cell.append(lab);
+    if (cur) {
+      const rm = document.createElement('button'); rm.textContent = '×'; rm.title = 'remove'; rm.style.marginLeft = '6px';
+      rm.onclick = () => { extras.delete(type); rebuild(); renderPlainFiles(); renderImages(); refresh(); };
+      cell.append(rm);
+    }
+    box.append(name, sel, cell);
+  }
+}
+
+async function addPlain(type, file) {
+  const data = new Uint8Array(await file.arrayBuffer());
+  try {
+    let img;
+    if (type === 'ape-algo' && data[0] === 0xb4) {
+      const fi = parseFiasco(data);
+      const ape = pickImage(fi, 'ape-algo', null, null);
+      if (!ape) throw new Error('no ape-algo image in this FIASCO');
+      log('Picked ape-algo from a FIASCO file');
+      img = { ...ape, source: file.name };
+    } else {
+      img = plainImage(type, data, file.name);
+    }
+    log(`Image option ${type} "${file.name}" (${fmtSize(img.size)})`, 1);
+    const prev = extras.get(type);
+    extras.set(type, img);
+    if (!rebuild()) { if (prev) extras.set(type, prev); else extras.delete(type); }
+  } catch (err) {
+    log(`ERROR: ${file.name}: ${err.message}`);
+  }
+  renderPlainFiles(); renderImages(); refresh();
+}
 
 const LOADER_TYPES = new Set(['2nd', '1st', 'ape-algo', 'initfs', 'initrd']);
 const flashable = (img) => SU_FLASH_ORDER.includes(img.type);
@@ -250,19 +324,27 @@ const selectedIndexes = () => new Set([...document.querySelectorAll('#images inp
 
 const WARRANTY = 'WARNING: This tool is intended for professional use only. Using it may result in permanently damaging your device or losing the warranty.\n\nContinue?';
 
+const eraseOpts = () => ({
+  eraseMmc: $('opt-erase-mmc').checked ? $('erase-method').value : false,
+  eraseUserData: $('opt-erase-user').checked,
+});
+const flashWarning = () => WARRANTY.replace(/\n\nContinue\?$/, '') +
+  (eraseOpts().eraseMmc ? `\n\nThe eMMC will be erased (${eraseOpts().eraseMmc}) first.` : '') +
+  (eraseOpts().eraseUserData ? '\n\nUser data (eMMC and swap) will be erased first and the device lock reset.' : '') +
+  ($('opt-nopreserve').checked ? '\n\nThe eMMC will be repartitioned; its contents are not preserved.' : '') + '\n\nContinue?';
+
 $('btn-flash').onclick = () => run('Flashing', async () => {
   await flasher.flash(fiasco, selectedIndexes(), {
     reboot: $('opt-reboot').checked,
     noPreserve: $('opt-nopreserve').checked,
     skipBattery: $('opt-skipbat').checked,
-    eraseMmc: $('opt-erase-mmc').checked,
-    eraseUserData: $('opt-erase-user').checked,
+    ...eraseOpts(),
   });
   lastInfo = null;
   flasher.session = null;
   await host.release();
   resetProgress('flashing finished');
-}, { confirmText: WARRANTY });
+}, { confirmText: () => flashWarning() });
 
 $('btn-abort').onclick = () => { flasher.abort(); log('Abort requested, finishing the current step...'); };
 $('btn-reboot').onclick = () => run('Rebooting', async () => { await flasher.reboot(); await dropSession(); });
@@ -279,8 +361,9 @@ $('btn-rd-on').onclick = () => run('Enabling R&D mode', () => flasher.setRdMode(
 $('btn-rd-off').onclick = () => run('Disabling R&D mode', () => flasher.setRdMode(false));
 $('btn-rd-set').onclick = () => run('Setting R&D flags', () => flasher.setRdFlags($('rd-flags').value.trim(), 'set'), { confirmText: WARRANTY });
 $('btn-rd-clear').onclick = () => run('Clearing R&D flags', () => flasher.setRdFlags($('rd-flags').value.trim(), 'clear'));
-$('btn-erase-mmc').onclick = () => run('Erasing MMC', () => flasher.erase('mmc', fiasco), { confirmText: 'This securely erases the whole eMMC. ' + WARRANTY });
+$('btn-erase-mmc').onclick = () => run('Erasing MMC', () => flasher.erase('mmc', fiasco, $('erase-method').value), { confirmText: `This erases the whole eMMC (${$('erase-method').value}). ` + WARRANTY });
 $('btn-erase-user').onclick = () => run('Erasing user data', () => flasher.erase('userdata', fiasco), { confirmText: 'This erases all user data and resets the device lock. ' + WARRANTY });
 
+renderPlainFiles();
 refresh();
 log('N9/N950 web flasher ready. Put the phone into flash mode, then click Connect.');

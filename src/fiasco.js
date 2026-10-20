@@ -107,14 +107,57 @@ export function serializeSubblocks(subblocks) {
   return out;
 }
 
-/** Combine several FIASCO files (e.g. main + eMMC image) into one image list. */
-export function mergeFiascos(list) {
-  const images = [];
-  for (const { file, fiasco } of list) {
-    for (const im of fiasco.images) images.push({ ...im, index: images.length, source: file });
+/** Image types that can be supplied as individual files (flasher -a -k -L -n -r --cmt-*). */
+export const PLAIN_TYPES = ['ape-algo', 'kernel', 'moslo', 'initfs', 'rootfs', 'cmt-2nd', 'cmt-algo', 'cmt-mcusw'];
+
+/**
+ * Wrap a plain image the way the original does: one file-data subblock
+ * (asic 1, NAND, idx 0, hash, 12-byte type name, size, load address 0).
+ */
+export function plainImage(type, data, source = '') {
+  const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
+  if (type === 'rootfs' && ((u8[0] === 0x1f && u8[1] === 0x8b) || new TextDecoder('latin1').decode(u8.subarray(257, 262)) === 'ustar')) {
+    throw new ProtocolError('rootfs in this format (tar/gzip) requires a layout file - you need to use fiasco-gen');
   }
-  const first = list[0]?.fiasco;
-  return { name: first?.name ?? '', swVersion: first?.swVersion ?? '', swBlob: first?.swBlob ?? new Uint8Array(0), images };
+  const fd = new Uint8Array(0x19);
+  const dv = new DataView(fd.buffer);
+  fd.set([1, 1, 0], 0);
+  dv.setUint16(3, imageHash(u8));
+  fd.set(new TextEncoder().encode(type).subarray(0, 12), 5);
+  dv.setUint32(17, u8.length);
+  const subblocks = [{ id: SUBBLOCK_FILE, data: fd }];
+  return {
+    type, size: u8.length, paddedSize: (u8.length + 127) & ~127, hash: imageHash(u8),
+    asic: 1, devType: 1, devIdx: 0, checksum: 0, version: '', products: [], layout: null, emmc: false,
+    subblocks, blob: serializeSubblocks(subblocks), offset: 0, data: u8, source, plain: true,
+  };
+}
+
+/**
+ * Combine FIASCO files and user-supplied plain images into one image list.
+ * Like the original: at most one FIASCO may carry a SW version, and a
+ * user-supplied image replaces FIASCO images of the same type.
+ * Returns {..., warnings[]}.
+ */
+export function mergeFiascos(list, extras = []) {
+  if (list.filter((x) => x.fiasco.swVersion).length > 1) {
+    throw new ProtocolError('Refusing to read more than one versioned FIASCO image');
+  }
+  const warnings = [];
+  const images = [];
+  const overridden = new Set(extras.map((e) => e.type));
+  for (const { file, fiasco } of list) {
+    for (const im of fiasco.images) {
+      if (overridden.has(im.type)) { warnings.push(`Warning: ignoring subimage '${im.type}' from file '${file}'`); continue; }
+      images.push({ ...im, index: images.length, source: file });
+    }
+  }
+  for (const e of extras) images.push({ ...e, index: images.length });
+  const first = list.find((x) => x.fiasco.swVersion)?.fiasco ?? list[0]?.fiasco;
+  return {
+    name: first?.name ?? '', swVersion: first?.swVersion ?? '', swBlob: first?.swBlob ?? new Uint8Array(0),
+    images, warnings,
+  };
 }
 
 export const imageMatches = (img, product, hwrev) =>

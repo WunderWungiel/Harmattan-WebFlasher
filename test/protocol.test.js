@@ -95,7 +95,7 @@ test('FIASCO round trip, product matching, 128-byte padding', () => {
   assert.throws(() => parseFiasco(Uint8Array.of(1, 2, 3)));
   const bad = file.slice(); bad[bad.length - 1] ^= 0xff;
   assert.equal(verifyImageHash(parseFiasco(bad).images[2]), false);
-  assert.equal(mergeFiascos([{ file: 'a', fiasco: f }, { file: 'b', fiasco: f }]).images.length, 6);
+  assert.throws(() => mergeFiascos([{ file: 'a', fiasco: f }, { file: 'b', fiasco: f }]), /more than one versioned/);
 });
 
 test('R&D flag parsing', () => {
@@ -235,4 +235,39 @@ test('real N9 (0421:051a, PC Suite mode) descriptor yields the Phonet interface'
   const cfg = new Uint8Array(readFileSync(new URL('./fixtures/n9-051a-config.bin', import.meta.url)));
   const ph = findPhonetInterface(parseConfigDescriptor(cfg));
   assert.deepEqual({ ...ph }, { controlInterface: 1, dataInterface: 2, dataAlt: 1, inEp: 3, outEp: 2, rawOutEp: null });
+});
+
+test('plain images get a single file-data subblock; tar/gzip rootfs is refused', async () => {
+  const { plainImage } = await import('../src/fiasco.js');
+  const k = plainImage('kernel', rnd(1000, 3), 'zImage');
+  assert.equal(k.blob.length, 2 + 0x19);
+  assert.equal(k.blob[0], 0x2e);
+  assert.equal(k.paddedSize, 1024);
+  assert.equal(verifyImageHash(k), true);
+  const roundTrip = parseFiasco(buildFiasco({ images: [{ type: 'kernel', data: k.data }] })).images[0];
+  assert.deepEqual([...k.blob.subarray(5, 7)], [...roundTrip.blob.subarray(5, 7)]); // same hash bytes
+  assert.throws(() => plainImage('rootfs', Uint8Array.of(0x1f, 0x8b, 8, 0, 0, 0)), /layout file/);
+});
+
+test('merge: one versioned FIASCO only; user images replace same-type FIASCO images', async () => {
+  const { plainImage } = await import('../src/fiasco.js');
+  const main = parseFiasco(buildFiasco({ swVersion: 'A', images: [{ type: 'kernel', data: rnd(300, 1) }, { type: 'rootfs', data: rnd(300, 2) }] }));
+  const mmc = parseFiasco(buildFiasco({ swVersion: '', images: [{ type: 'mmc', data: rnd(300, 3) }] }));
+  const other = parseFiasco(buildFiasco({ swVersion: 'B', images: [] }));
+  const m = mergeFiascos([{ file: 'main.bin', fiasco: main }, { file: 'mmc.bin', fiasco: mmc }]);
+  assert.deepEqual(m.images.map((i) => i.type), ['kernel', 'rootfs', 'mmc']);
+  assert.equal(m.swVersion, 'A');
+  assert.throws(() => mergeFiascos([{ file: 'a', fiasco: main }, { file: 'b', fiasco: other }]), /more than one versioned/);
+  const m2 = mergeFiascos([{ file: 'main.bin', fiasco: main }], [plainImage('kernel', rnd(100, 9), 'my-zImage')]);
+  assert.deepEqual(m2.images.map((i) => `${i.type}:${i.source}`), ['rootfs:main.bin', 'kernel:my-zImage']);
+  assert.equal(m2.warnings.length, 1);
+  assert.deepEqual(m2.images.map((i) => i.index), [0, 1]);
+});
+
+test('erase honours the method and runs before BEGIN_UPDATE', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({ images: [{ type: 'kernel', data: rnd(4096, 9) }] })) }]);
+  const srv = new FakeSuServer();
+  await new Flasher(new FakeHost([sessionFor(srv)])).flash(fi, new Set([0]), { eraseMmc: 'quick', eraseUserData: true, reboot: false });
+  assert.deepEqual(srv.erased, ['mmc=quick', 'userdata=secure']);
+  assert.ok(srv.seen.indexOf(0x12) < srv.seen.indexOf(0x03));
 });

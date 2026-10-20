@@ -230,8 +230,11 @@ export class Flasher {
 
     if (!options.skipBattery) await this.#batteryGate(su);
 
-    if (options.eraseMmc) await su.erase('mmc');
-    if (options.eraseUserData) await su.erase('userdata');
+    if (options.eraseMmc && options.eraseUserData) {
+      this.log('Warning: user data may reside on MMC. In that case the MMC is unnecessarily erased twice.');
+    }
+    if (options.eraseMmc) await su.erase('mmc', options.eraseMmc === true ? 'secure' : options.eraseMmc);
+    if (options.eraseUserData) await su.erase('userdata', 'secure');
 
     this.log('Begin update');
     await su.beginUpdate().catch(async (e) => {
@@ -374,13 +377,13 @@ export class Flasher {
     return { rdMode: info.rdMode, rdFlags: info.rdFlags };
   }
 
-  async erase(what /* 'mmc' | 'userdata' */, fiasco = null) {
+  async erase(what /* 'mmc' | 'userdata' */, fiasco = null, method = 'secure') {
     let s = this.session ?? await this.connect();
     if (s.mode !== 'phonet' && fiasco) s = await this.enterSu(fiasco);
     if (s.mode !== 'phonet') throw new ProtocolError('Erase not supported. Use APE flashing algorithm (load a firmware file that contains ape-algo).');
     const su = await this.#suReady();
     await this.#batteryGate(su);
-    await su.erase(what);
+    await su.erase(what, method);
   }
 }
 
