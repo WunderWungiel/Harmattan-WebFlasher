@@ -1,4 +1,6 @@
-# N9 / N950 Web Flasher
+# Harmattan WebFlasher
+
+N9 / N950 flasher in the browser.
 
 Browser-based replacement for Nokia's `flasher` 3.12 (MeeGo Harmattan) for the N9 (RM-696) and N950 (RM-680), built on WebUSB. Protocol details are in [PROTOCOL.md](PROTOCOL.md).
 
@@ -101,6 +103,7 @@ Layout: `src/protocol.js` (pure protocol), `src/fiasco.js` (parser), `src/flashe
 
 ## 6. Credits and legal
 
+- Licensed under the [MIT License](LICENSE). Not affiliated with or endorsed by Nokia.
 - Protocol knowledge comes from observing the behaviour of Nokia's `flasher` 3.12.1 for interoperability, cross-checked against the open-source [0xFFFF](https://github.com/pali/0xFFFF) project by Pali Rohár (GPLv3). No code was copied from either; this is an independent implementation of the same wire protocols.
 - Verified on real hardware so far: N9 (RM-696) identify in PC Suite mode, ADL reboot into NOLO, NOLO identify, reboot. Flashing itself is not yet verified on hardware.
 - Troubleshooting: if Connect fails with `Unable to claim interface`, another program owns the phone. A VirtualBox USB filter for vendor `0421` ("Captured" in `VBoxManage list usbhost`) is a common cause. Disable the filter or stop the VM; it would also re-capture the phone every time it re-enumerates.

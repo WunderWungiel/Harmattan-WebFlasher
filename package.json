@@ -1,5 +1,6 @@
 {
-  "name": "n9-web-flasher",
+  "name": "harmattan-webflasher",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
