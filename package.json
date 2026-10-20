@@ -1,0 +1,9 @@
+{
+  "name": "n9-web-flasher",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/",
+    "serve": "python3 serve.py 8000"
+  }
+}

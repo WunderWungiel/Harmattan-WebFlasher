@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N9 / N950 Web Flasher</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>N9 / N950 Web Flasher</h1>
+  <p class="sub">WebUSB replacement for Nokia's <code>flasher</code> 3.12 &mdash; MeeGo Harmattan, RM-696 and RM-680.</p>
+  <p class="warn">Flashing can permanently damage the device or void its warranty. Keep the battery above ~30&nbsp;% and never unplug during a flash.</p>
+</header>
+
+<div id="unsupported" class="banner error" hidden></div>
+
+<main>
+  <section class="card" id="card-device">
+    <h2><span class="n">1</span> Device</h2>
+    <div class="row">
+      <button id="btn-connect" class="primary">Connect&hellip;</button>
+      <button id="btn-wait">Wait for device</button>
+      <button id="btn-identify" disabled>Identify (-i)</button>
+      <button id="btn-flashmode" disabled title="Sync / PC Suite mode only (ADL reboot)">Reboot to flash mode</button>
+      <button id="btn-disconnect" disabled>Disconnect</button>
+    </div>
+    <dl id="device-info" class="kv" hidden></dl>
+    <div id="waiting" class="banner" hidden>
+      <span>Waiting for the phone to come back after re-enumeration. If it doesn't appear, grant access to it again:</span>
+      <button id="btn-grant">Select device&hellip;</button>
+    </div>
+    <details>
+      <summary>Which USB mode is which?</summary>
+      <ul class="hint">
+        <li><b>NOLO / update mode</b> (<code>0421:0105</code>): the bootloader's flash mode. The usual way in is powering off and plugging in USB while holding a volume key (check your device's flashing guide).</li>
+        <li><b>Cold flash</b> (<code>0451:d00e</code>, <code>0451:d009</code> or <code>0421:0106</code>): OMAP boot ROM, for a device with a dead bootloader.</li>
+        <li><b>Phonet</b> (<code>0421:xxxx</code> CDC interface): a running system or the loaded APE algorithm. <i>Identify</i> works here.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="card" id="card-fw">
+    <h2><span class="n">2</span> Firmware</h2>
+    <div class="row">
+      <label class="file">
+        <input type="file" id="file" multiple accept=".bin,.fiasco,.img">
+        <span>Choose FIASCO file(s)&hellip;</span>
+      </label>
+      <button id="btn-clear" disabled>Clear</button>
+      <span id="fw-summary" class="muted"></span>
+    </div>
+    <div class="tablewrap">
+      <table id="images" hidden>
+        <thead><tr><th></th><th>Image</th><th>Size</th><th>Version</th><th>Valid for</th><th>Hash</th><th>File</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="muted small">Loader images (<code>2nd</code>, <code>ape-algo</code>) are used automatically to get the phone into flashing mode; they are never flashed. For the N9, load the main FIASCO and the eMMC FIASCO together.</p>
+  </section>
+
+  <section class="card" id="card-actions">
+    <h2><span class="n">3</span> Actions</h2>
+    <div class="row">
+      <button id="btn-flash" class="primary" disabled>Flash selected (-f)</button>
+      <button id="btn-abort" disabled>Abort</button>
+      <button id="btn-reboot" disabled>Reboot (-R)</button>
+      <button id="btn-boot" disabled title="NOLO only">Boot (-b)</button>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="opt-reboot" checked> reboot after flashing</label>
+      <label><input type="checkbox" id="opt-nopreserve"> <code>--no-preserve</code> (wipe MMC contents)</label>
+      <label><input type="checkbox" id="opt-skipbat"> skip battery check</label>
+      <label><input type="checkbox" id="opt-erase-mmc"> erase MMC first</label>
+      <label><input type="checkbox" id="opt-erase-user"> erase user data first</label>
+    </div>
+    <details>
+      <summary>R&amp;D mode</summary>
+      <div class="row">
+        <button id="btn-rd-query" disabled>Query</button>
+        <button id="btn-rd-on" disabled>Enable</button>
+        <button id="btn-rd-off" disabled>Disable</button>
+      </div>
+      <div class="row">
+        <input id="rd-flags" type="text" placeholder="no-lifeguard-reset,serial-console" spellcheck="false" size="38">
+        <button id="btn-rd-set" disabled>Set flags</button>
+        <button id="btn-rd-clear" disabled>Clear flags</button>
+      </div>
+      <p class="muted small">Flags: <code id="rd-flag-list"></code></p>
+    </details>
+    <details>
+      <summary>Erase</summary>
+      <div class="row">
+        <button id="btn-erase-mmc" disabled>Erase MMC</button>
+        <button id="btn-erase-user" disabled>Erase user data</button>
+      </div>
+      <p class="muted small">Needs the APE algorithm running; a loaded firmware file containing <code>ape-algo</code> is used to start it.</p>
+    </details>
+  </section>
+
+  <section class="card" id="card-progress">
+    <h2><span class="n">4</span> Progress &amp; log</h2>
+    <div class="progress"><div id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
+    <div id="progress-text" class="muted">idle</div>
+    <div class="row logbar">
+      <label>Verbosity
+        <select id="verbosity"><option value="0">normal</option><option value="1">-v</option><option value="2">-vv</option><option value="3">-vvv</option></select>
+      </label>
+      <button id="btn-copy">Copy log</button>
+      <button id="btn-save">Save log</button>
+      <button id="btn-clearlog">Clear</button>
+    </div>
+    <pre id="log" aria-live="polite"></pre>
+  </section>
+</main>
+
+<footer class="muted small">
+  Protocol notes: <a href="PROTOCOL.md">PROTOCOL.md</a>. Everything runs in your browser; firmware files never leave your machine.
+</footer>
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# Nokia's closed-source tool and the GPL reference checkout: local reference only
+/flasher
+/0xFFFF/
+node_modules/
+*.log

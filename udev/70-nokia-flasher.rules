@@ -1,0 +1,15 @@
+# Let the logged-in user talk to Nokia N9 (RM-696) / N950 (RM-680) in every
+# flashing-related USB mode from Chromium/WebUSB, without root.
+#
+#   0421:xxxx   Nokia: NOLO (0105), cold flash "USB ROM" (0106), Phonet/SU,
+#               sync mode (03d2, 051a), ...
+#   0451:d009   TI OMAP boot ROM (cold flash)
+#   0451:d00e   TI OMAP boot ROM (cold flash)
+#
+# "uaccess" grants an ACL to whoever owns the active seat (systemd-logind),
+# so no group membership is needed. ID_MM_DEVICE_IGNORE keeps ModemManager
+# from probing the device while it is being flashed.
+
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0421", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0451", ATTR{idProduct}=="d009", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0451", ATTR{idProduct}=="d00e", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1"
