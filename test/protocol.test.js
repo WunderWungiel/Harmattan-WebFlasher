@@ -660,3 +660,20 @@ test('UPDATE_SW_REL is sent with an empty header when only plain images are flas
   assert.deepEqual(srv.swRel, new Uint8Array(0));
   assert.ok(srv.finished);
 });
+
+test('-l also loads the CMT images when a cmt-algo is there, and then needs all three', async () => {
+  const build = (types) => mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: types.map((type, i) => ({ type, data: rnd(300, i + 1) })),
+  })) }]);
+  const nolo = new FakeNolo();
+  const fi = build(['kernel', 'cmt-mcusw', 'cmt-algo', 'cmt-2nd']);
+  await new Flasher(new FakeHost([{ mode: 'nolo', transport: nolo.transport(), usb: { vid: 0x421, pid: 0x105 } }])).loadAndBoot(fi);
+  const typeOf = (blob) => new TextDecoder().decode(blob.subarray(7, 19)).replace(/\0.*$/s, '');
+  assert.deepEqual(nolo.sent.map((x) => typeOf(x.blob)), ['kernel', 'cmt-2nd', 'cmt-algo', 'cmt-mcusw']);
+  assert.ok(nolo.booted);
+
+  const short = new FakeNolo();
+  await assert.rejects(new Flasher(new FakeHost([{ mode: 'nolo', transport: short.transport(), usb: { vid: 0x421, pid: 0x105 } }]))
+    .loadAndBoot(build(['kernel', 'cmt-algo', 'cmt-2nd'])), /CMT MCUSW image is required/);
+  assert.equal(short.booted, null);
+});

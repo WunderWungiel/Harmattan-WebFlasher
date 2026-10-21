@@ -513,7 +513,10 @@ export class Flasher {
   /**
    * `flasher -k kernel [-n initfs] -l -b[cmdline]`, NOLO only: send the
    * kernel (and initfs, if loaded) into RAM with SEND_IMAGE and boot it.
-   * Nothing is flashed; the next reboot starts the kernel in flash again.
+   * Like the original's -l (mask 0x3ff, FUN_0040b91d), a cmt-algo for this
+   * device brings cmt-2nd, cmt-algo and cmt-mcusw along, and then all three
+   * are required (FUN_0040b7f2). Nothing is flashed; the next reboot starts
+   * the kernel in flash again.
    */
   async loadAndBoot(fiasco, cmdline = null) {
     const s = this.session ?? await this.connect(['nolo']);
@@ -522,7 +525,15 @@ export class Flasher {
     const info = await nolo.init();
     const kernel = pickImage(fiasco, 'kernel', info.product, info.hwRev);
     if (!kernel) throw new ProtocolError(`No kernel image for ${info.product} rev. ${info.hwRev}. Load a FIASCO with one or choose a kernel file.`);
-    for (const img of [kernel, pickImage(fiasco, 'initfs', info.product, info.hwRev)].filter(Boolean)) {
+    const pick = (type) => pickImage(fiasco, type, info.product, info.hwRev);
+    const load = [kernel, pick('initfs')].filter(Boolean);
+    if (pick('cmt-algo')) {
+      for (const [type, what] of [['cmt-2nd', 'CMT 2nd image'], ['cmt-algo', 'CMT algorithm image'], ['cmt-mcusw', 'CMT MCUSW image']]) {
+        if (!pick(type)) throw new ProtocolError(`${what} is required to flash CMT`);
+        load.push(pick(type));
+      }
+    }
+    for (const img of load) {
       this.#check();
       await nolo.sendImage(img, (d, t) => this.progress({ label: `${img.type} (NOLO)`, done: d, total: t, state: 'loading' }));
     }
