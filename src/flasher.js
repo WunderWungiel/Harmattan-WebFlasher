@@ -304,6 +304,8 @@ export class Flasher {
       throw e;
     });
     if (su.version >= 100) await su.setParam('/update/cmt/verify', '1');
+    // On by default in the original (flasher_opts+4 = 1); only -Ono-cmt-rfs skips it.
+    await su.setParam('/update/cmt/perform_rfs', '1');
     // Like the original, a failure here is reported but does not stop the update.
     if (su.version >= 104) {
       try { await su.setParam('/update/mmc/no_preserve', options.noPreserve ? '1' : '0'); } catch (e) {
@@ -414,7 +416,7 @@ export class Flasher {
    * Flash one image. Returns false when the image failed while its data was
    * sent or programmed (the update may go on with other groups); throws when
    * the whole update has to stop, as the original does for BEGIN_IMAGE_UPDATE
-   * and FINISH_IMAGE_UPDATE failures.
+   * and FINISH_IMAGE_UPDATE failures and for a finished image with the failed bit.
    */
   async #flashImage(su, img) {
     const label = img.type;
@@ -441,7 +443,9 @@ export class Flasher {
     let st = { stateName: 'init', done: 0, total };
     const poll = async () => {
       st = await su.getStatus(pipe);
-      if (st.failed) throw new SuError('Update failed!');
+      // Like FUN_004100e0: a finished image with the failed bit stops the whole
+      // update; otherwise only this image (and the rest of its group) fails.
+      if (st.failed) throw st.state === 0x10 ? new SuError('Update failed.', { fatal: true }) : new SuError('Update failed!');
       lastPoll = Date.now();
       const secs = Math.max((Date.now() - start) / 1000, 0.001);
       this.progress({ label, done: sent, total, state: st.stateName, flashed: st.done, flashTotal: st.total, speed: Math.round(sent / 1024 / secs) });
@@ -480,6 +484,7 @@ export class Flasher {
       if (e instanceof Cancelled || e.code === 'disconnected') throw e;
       this.log(`Image ${img.type} failed: ${e.message}`);
       this.progress({ label, done: sent, total, state: 'failed' });
+      if (e.fatal) throw e;
       return false;
     }
     await su.finishImage(pipe);

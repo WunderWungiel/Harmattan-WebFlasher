@@ -28,7 +28,7 @@ Build facts: ELF64, dynamically linked against `libusb-0.1` and `librt`, strippe
 -U bus[:addr] | s:<usb serial> | S:<serial>
 --erase-user-data[=secure]   --erase-mmc[=secure]
 --no-preserve  -v trace  --quiet  --suppress-warranty-warning
--O<opt>  (hidden: wait-charging, no-cmt-rfs, ...)
+-O<opt>  (comma list: no-battery-level-check, nand-repartition, wait-charging, no-cmt-rfs)
 ```
 
 Image names recognised (table at `0x61fc80`) **[bin]**: `cert-sw`(0x4000) `cmt-2nd`(0x10) `cmt-algo`(0x20) `cmt-mcusw`(0x40) `xloader`/`secondary`(0x1) `kernel`(0x2) `moslo`(0x80) `rootfs`(0x8) `mmc`(0x100) `tar`(0x200) `config`(0x2000). Also handled in the FIASCO/NOLO paths: `1st`, `2nd`, `ape-algo`(0x1000), `initfs`(4), `initrd`.
@@ -251,7 +251,9 @@ Default reply timeout 5000 ms. `FEED_DATA_BLOCK` waits 20000 ms. `WAIT_FOR_BUFFE
 
 ### 5.3 State values in GET_UPDATE_STATUS **[bin]**
 
-`state & 0xFFFF`: `0` pending, `1` init, `2` erasing, `3` writing, `4` finishing, `0x10` finished. `state & 0x10000` set = **update failed**. When `finished` is seen, the host sends FINISH_IMAGE_UPDATE for that pipe.
+`state & 0xFFFF`: `0` pending, `1` init, `2` erasing, `3` writing, `4` finishing, `0x10` finished. `state & 0x10000` set = **update failed**. When `finished` is seen without the failed bit, the host sends FINISH_IMAGE_UPDATE for that pipe (`FUN_004100e0`).
+
+The failed bit is handled in two places. While the image is not finished, `FUN_0040fc27` returns −1 ("Update failed!"): that image fails and the rest of its group is skipped (5.6). `0x10010` (finished + failed) is returned by `FUN_0040fc27` as finished, but the stored state is tested again by `FUN_004100e0`, which checks the failed bit **before** `0x10` (`0x4101ff`). It prints "Update failed." and stops the whole update: no FINISH_IMAGE_UPDATE, no UPDATE_SW_REL, error list, then FINISH_UPDATE.
 
 ### 5.4 Init sequence (`FUN_00412259` → `FUN_00412e99`)
 
@@ -279,7 +281,7 @@ Protocol-version feature gates: `≥101` cancel update (0x65), `≥102` error li
 | `/update/trace_level` | set | |
 | `/update/no_battery_level_check` | set `1` | only with the `-O` option at `flasher_opts+0x18`; sent before flashing (`FUN_0041155c`) and before BEGIN_ERASE |
 | `/update/cmt/verify` | set `1` | proto ≥ 100 unless `-O` skips |
-| `/update/cmt/perform_rfs` | set `1` | only when the option at `flasher_opts+4` is set; not sent by default |
+| `/update/cmt/perform_rfs` | set `1` | sent by default after `/update/cmt/verify` (no protocol check): `FUN_0040a8dc` sets `flasher_opts+4 = 1`, only `-Ono-cmt-rfs` clears it. A failure stops the update ("Unable to set CMT RFS option") |
 | `/update/mmc/no_preserve` | set `0`/`1` | proto ≥ 104; a failure only prints "Unable to set MMC no preserve" and the update goes on (`0x4117cb` ignores the result of `FUN_004139f4`) |
 | `/update/nand/part_table/version` | get | copied to ↓ |
 | `/device/nand/part_table/version` | set | repartition |
@@ -312,7 +314,7 @@ FINISH_UPDATE
 Notes:
 - The image payload length is padded up to a multiple of 128 bytes (`WARNING: Image '%s' not aligned`); the padding is **`0xFF`** (6.2).
 - The aux ("raw") pipe is used for images in group 2 (eMMC rootfs, `mmc`) when a raw data EP was found, never for `tar`. Raw bulk writes retry up to 10 times on `EAGAIN`; zero-length result = "Raw data transfer timed out". If SETUP_AUX_DATA_PIPE fails, its result is ignored and the image is sent with FEED_DATA_BLOCK instead.
-- **Per-image failures** (`FUN_00410002`): a failure while the data is sent (WAIT_FOR_BUFFER, PREPARE_DATA_BLOCK, FEED / raw write) or a GET_UPDATE_STATUS that fails or reports the failed bit marks that image failed and every later image of the **same group** skipped. Other groups go on. A failed `cert-sw` stops the update at once. Because nothing but xloader/secondary may start while one of them is unfinished, a failed xloader/secondary would leave the scheduler waiting forever; the web version skips everything after it instead. A failing BEGIN_IMAGE_UPDATE or FINISH_IMAGE_UPDATE, or an image read error, stops the update at once. When the loop ends with any failed or skipped image, UPDATE_SW_REL is **not** sent and the failure path below runs.
+- **Per-image failures** (`FUN_00410002`): a failure while the data is sent (WAIT_FOR_BUFFER, PREPARE_DATA_BLOCK, FEED / raw write) or a GET_UPDATE_STATUS that fails or reports the failed bit on an unfinished image (5.3) marks that image failed and every later image of the **same group** skipped. Other groups go on. A failed `cert-sw` stops the update at once. Because nothing but xloader/secondary may start while one of them is unfinished, a failed xloader/secondary would leave the scheduler waiting forever; the web version skips everything after it instead. A failing BEGIN_IMAGE_UPDATE or FINISH_IMAGE_UPDATE, or an image read error, stops the update at once. When the loop ends with any failed or skipped image, UPDATE_SW_REL is **not** sent and the failure path below runs.
 - Failure → `FUN_00410f38` dumps `/update/error_list` (proto ≥ 102), then `FINISH_UPDATE`. This path (`0x411ebe`) is taken only once the image loop has started (a data-loop or BEGIN_IMAGE_UPDATE failure, or failed images at the end). A failure before it (BEGIN_UPDATE, `/update/cmt/verify`, `/update/cmt/perform_rfs`, repartition) returns at once: no error list, no FINISH_UPDATE. A failed BEGIN_ERASE (`0x413c02`) fetches the error list, or for status 11 prints the battery-low message (`FUN_004109df`: "BATTERY IS LOW. DEVICE IS NOW CHARGING.", then "Charging battery, %d %% battery level (10 %% required)"). `SU_CANCEL_UPDATE` is sent only on Ctrl-C (proto ≥ 101), from inside the pending request, after which the same failure path runs.
 - Progress UI in the original: `[S] name [state progress% done / total kB  speed kB/s]`; states drawn as `_`,` `,`f`,`-`,`x`,`F` (failed).
 - Ordering rules in `FUN_004115b1`: images are looked up for the device's `product_code` + `hw_build` (6.3); a second lookup without device info only decides between `Image %s not present` and `Image %s not present for this HW (%s rev. %s)`. Flag `0x4000` (cert-sw) is OR'd in whenever any of the `0x38F` bits is selected: xloader/secondary (1), kernel (2), initfs (4), rootfs (8), moslo (0x80), mmc (0x100), tar (0x200). `config` is not included. When a rootfs is found, the tar bit is cleared, so tar is skipped (`Image tar skipped`).

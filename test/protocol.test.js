@@ -171,6 +171,7 @@ test('full SU flash: kernel (feed) + rootfs (raw pipe) + reboot', async () => {
   assert.ok(srv.swRel && srv.swRel[0] === 0xe8);
   assert.equal(srv.params.get('/update/mmc/no_preserve'), '0');
   assert.equal(srv.params.get('/update/cmt/verify'), '1');
+  assert.equal(srv.params.get('/update/cmt/perform_rfs'), '1');
   assert.ok(logs.some((l) => /Success/.test(l)));
 });
 
@@ -515,6 +516,10 @@ test('setup failures after BEGIN_UPDATE return at once; erase failures fetch the
   assert.ok(!cmt.finished);
   assert.ok(!cmt.seen.includes(0x1f));
   assert.equal(cmt.images.length, 0);
+  const rfs = new FakeSuServer({ rejectSet: ['/update/cmt/perform_rfs'] });
+  await assert.rejects(new Flasher(new FakeHost([sessionFor(rfs)])).flash(fi, new Set([0]), { reboot: false }), /error code 6/);
+  assert.ok(!rfs.seen.includes(0x1f));
+  assert.equal(rfs.images.length, 0);
 
   const er = new FakeSuServer();
   er.eraseError = 1;
@@ -678,18 +683,33 @@ test('-l also loads the CMT images when a cmt-algo is there, and then needs all 
   assert.equal(short.booted, null);
 });
 
-test('GET_UPDATE_STATUS: finished wins over the failed bit, like FUN_0040fc27', async () => {
+test('GET_UPDATE_STATUS: the failed bit counts even with finished, like FUN_004100e0', async () => {
   const be = (n, bytes) => { const b = new Uint8Array(bytes); let x = BigInt(n); for (let i = bytes - 1; i >= 0; i--) { b[i] = Number(x & 255n); x >>= 8n; } return b; };
   const status = (trid, state) => {
     const b = isiBuild({ trid, id: 0x26, payload: concat(be(state, 4), be(10, 8), be(10, 8), Uint8Array.of(0)) });
     b[1] = 0x10; b[2] = 0x00; return b;
   };
-  const q = [status(0, 0x10010), status(1, 0x10003)];
+  const q = [status(0, 0x10010), status(1, 0x10003), status(2, 0x10)];
   const su = new SuClient({ bulkOut: async () => {}, bulkIn: async () => q.shift() ?? null });
   const done = await su.getStatus(1);
   assert.equal(done.stateName, 'finished');
-  assert.equal(done.failed, false);
+  assert.equal(done.failed, true);
   assert.equal((await su.getStatus(1)).failed, true);
+  assert.equal((await su.getStatus(1)).failed, false);
+});
+
+test('a finished image with the failed bit stops the whole update, without FINISH_IMAGE_UPDATE', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: ['kernel', 'mmc'].map((type, i) => ({ type, data: rnd(512, i + 1) })),
+  })) }]);
+  const srv = new FakeSuServer({ failFinished: 'kernel' });
+  await assert.rejects(new Flasher(new FakeHost([sessionFor(srv)])).flash(fi, new Set([0, 1]), { reboot: false }), /Update failed\./);
+  assert.deepEqual(srv.images.map((i) => i.type), ['kernel']); // mmc (another group) not started
+  assert.ok(!srv.seen.includes(0x0a)); // no FINISH_IMAGE_UPDATE
+  assert.equal(srv.swRel, undefined);
+  assert.ok(srv.seen.indexOf(0x01, srv.seen.lastIndexOf(0x06)) >= 0); // error list
+  assert.equal(srv.seen.at(-1), 0x1f); // then FINISH_UPDATE
+  assert.equal(srv.rebooted, null);
 });
 
 test('R&D query over SU parses the flag list like over NOLO', async () => {

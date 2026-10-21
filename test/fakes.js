@@ -8,7 +8,7 @@ const be64 = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBig
 
 /** An SU (softupd) server speaking ISI over a fake bulk pipe. */
 export class FakeSuServer {
-  constructor({ protocol = 108, appInfo = '1.4.8', product = 'RM-696', hwBuild = '2101', battery = 80, failImage = null, rdMode = '', rejectSet = [], pingReply = null } = {}) {
+  constructor({ protocol = 108, appInfo = '1.4.8', product = 'RM-696', hwBuild = '2101', battery = 80, failImage = null, failFinished = null, rdMode = '', rejectSet = [], pingReply = null } = {}) {
     this.params = new Map([
       ['/update/protocol_version', String(protocol)],
       ['/update/application_info', appInfo],
@@ -26,6 +26,7 @@ export class FakeSuServer {
     this.images = []; // {blob, received[]}
     this.raw = [];
     this.failImage = failImage;
+    this.failFinished = failFinished; // image type reported as 0x10010 (finished + failed) once done
     this.rejectSet = rejectSet; // SET_PARAMETER keys answered with an error
     this.finished = false;
     this.rebooted = null;
@@ -112,6 +113,7 @@ export class FakeSuServer {
         const done = ps.got >= ps.padded && !ps.expect;
         let state = done ? 0x10 : 3;
         if (this.failImage === ps.type) state |= 0x10000;
+        if (done && this.failFinished === ps.type) state |= 0x10000;
         return this.#reply(req, 0x26, concat(be32(state), be64(ps.got), be64(ps.padded), Uint8Array.of(0)));
       }
       case SU.FINISH_IMAGE_UPDATE: return ok();
