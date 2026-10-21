@@ -162,14 +162,7 @@ export class Flasher {
       const nolo = this.#nolo();
       const n = await nolo.init();
       Object.assign(info, { product: n.product, hwRev: n.hwRev, nolo: n.nolo?.text, swRelease: n.swRelease });
-      try {
-        const word = await nolo.getRdFlags();
-        const flags = word & ~RD_FLAGS.master;
-        info.rdMode = word & RD_FLAGS.master;
-        info.rdFlags = rdFlagNames(flags);
-        this.log(`The device is in ${info.rdMode ? 'R&D' : 'production'} mode`);
-        this.log(`R&D flags ${info.rdMode ? '' : '(not effective) '}(0x${flags.toString(16).padStart(4, '0')}): ${info.rdFlags.join(',') || '(none)'}`);
-      } catch (e) { this.log(`R&D query failed: ${e.message}`, 1); }
+      try { this.#reportRd(info, await nolo.getRdFlags()); } catch (e) { this.log(`R&D query failed: ${e.message}`, 1); }
     } else if (SYNC_MODE_PIDS.includes(s.usb.pid)) {
       this.log('The phone is in Sync / PC Suite mode: the Phonet interface is claimable, but no flashing server is running.');
       this.log('Flash will reboot it into flash mode (NOLO) via the ADL protocol first. Nothing was changed.');
@@ -180,10 +173,20 @@ export class Flasher {
       if (!su) return this.identify(); // ADL-rebooted into NOLO
       Object.assign(info, su.info);
       try { info.battery = await su.batteryLevel(); this.log(`Battery level ${info.battery} %`); } catch { /* optional */ }
-      try { info.rdMode = await su.getRdMode(); this.log(`R&D mode: ${info.rdMode || '(none)'}`); } catch { /* optional */ }
+      // The reply is a plain flag list, parsed to the same bits as over NOLO (FUN_00409a23).
+      try { this.#reportRd(info, parseRdFlags(await su.getRdMode())); } catch (e) { this.log(`R&D query failed: ${e.message}`, 1); }
       this.log(`Supported images: ${su.info.supported.join(' ')}`);
     }
     return info;
+  }
+
+  /** `--query-rd-mode` output (FUN_00409b28) from the flag word; bit 0 is the R&D mode. */
+  #reportRd(info, word) {
+    const flags = word & ~RD_FLAGS.master;
+    info.rdMode = word & RD_FLAGS.master;
+    info.rdFlags = rdFlagNames(flags);
+    this.log(`The device is in ${info.rdMode ? 'R&D' : 'production'} mode`);
+    this.log(`R&D flags ${info.rdMode ? '' : '(not effective) '}(0x${flags.toString(16).padStart(4, '0')}): ${info.rdFlags.join(',') || '(none)'}`);
   }
 
   // ------------------------------------------------------------ -f

@@ -691,3 +691,15 @@ test('GET_UPDATE_STATUS: finished wins over the failed bit, like FUN_0040fc27', 
   assert.equal(done.failed, false);
   assert.equal((await su.getStatus(1)).failed, true);
 });
+
+test('R&D query over SU parses the flag list like over NOLO', async () => {
+  const srv = new FakeSuServer({ rdMode: 'master,serial-console' });
+  const logs = [];
+  const info = await new Flasher(new FakeHost([sessionFor(srv)]), { log: (m) => logs.push(m) }).queryRdMode();
+  assert.deepEqual(info, { rdMode: 1, rdFlags: ['serial-console'] });
+  assert.ok(logs.includes('The device is in R&D mode'));
+  assert.ok(logs.includes('R&D flags (0x0010): serial-console'));
+
+  const off = await new Flasher(new FakeHost([sessionFor(new FakeSuServer({ rdMode: 'no-ext-wd' }))])).queryRdMode();
+  assert.deepEqual(off, { rdMode: 0, rdFlags: ['no-ext-wd'] });
+});
