@@ -50,12 +50,15 @@
       <button id="btn-clear" disabled>Clear</button>
       <span id="fw-summary" class="muted"></span>
     </div>
-    <div class="tablewrap">
-      <table id="images" hidden>
-        <thead><tr><th></th><th>Image</th><th>Size</th><th>Version</th><th>Valid for</th><th>Hash</th><th>File</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <details id="images-box" hidden>
+      <summary id="images-summary">Sub-images</summary>
+      <div class="tablewrap">
+        <table id="images">
+          <thead><tr><th></th><th>Image</th><th>Size</th><th>Version</th><th>Valid for</th><th>Hash</th><th>File</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
     <div id="flash-only" class="row" hidden>
       <span class="muted" title="Like flasher --flash-only=LIST: tick image groups to flash only those">Flash only (<code>--flash-only</code>):</span>
       <span id="flash-only-groups" class="chips"></span>

@@ -74,7 +74,7 @@ Supported browsers: Chromium-based (Chrome, Chromium, Edge, Brave, Opera). Firef
 
 1. Put the phone in a flashing USB mode (see the *Which USB mode is which?* hint in the UI). **Identify** is safe in all of them.
 2. **Connect…**, choose the device, **Identify**. Expect a NOLO version and product/hardware revision.
-3. Load FIASCO files (N9: main image plus eMMC image). Untick what you don't want, or use the **Flash only** groups (`--flash-only`: `nolo` = xloader + secondary, `kernel`, `moslo`, `rootfs`, `cmt`, `mmc`, `tar`; **MMC only** = `-M`), then **Flash selected**. `config` images are left unticked, because the original never flashes them.
+3. Load FIASCO files (N9: main image plus eMMC image). Open **Sub-images** to untick what you don't want, or use the **Flash only** groups (`--flash-only`: `nolo` = xloader + secondary, `kernel`, `moslo`, `rootfs`, `cmt`, `mmc`, `tar`; **MMC only** = `-M`), then **Flash selected**. `config` images are left unticked, because the original never flashes them.
 4. Whenever the phone reboots/re-enumerates (after loading the APE algorithm, after cold flash), the page waits for it. Chromium only remembers a device it has seen before when the device has a serial number. If the page shows *Select device…*, click it once and pick the new entry.
 
 ## 4. Limitations vs. the native tool

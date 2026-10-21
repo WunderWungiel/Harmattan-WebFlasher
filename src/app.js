@@ -99,7 +99,14 @@ function refresh() {
   for (const i of document.querySelectorAll('#plain-files input[type=file]')) i.disabled = busy;
   for (const i of document.querySelectorAll('#flash-only input, #flash-only button')) i.disabled = busy;
   syncFlashOnly();
+  updateImagesSummary();
   renderDevice();
+}
+
+/** The collapsed sub-image list still says how many images are ticked. */
+function updateImagesSummary() {
+  if (!fiasco) return;
+  $('images-summary').textContent = `Sub-images (${selectedIndexes().size} of ${rowBoxes().length} flashable selected)`;
 }
 
 function renderDevice() {
@@ -293,10 +300,9 @@ const flashable = (img) => SU_FLASH_ORDER.includes(img.type);
 const flashByDefault = (img) => flashable(img) && img.type !== 'config';
 
 function renderImages() {
-  const tbl = $('images');
-  const body = tbl.tBodies[0];
+  const body = $('images').tBodies[0];
   body.textContent = '';
-  tbl.hidden = !fiasco;
+  $('images-box').hidden = !fiasco;
   renderFlashOnly();
   $('fw-summary').textContent = fiasco ? `${fiasco.images.length} sub-images, SW ${fiasco.swVersion || '?'}` : '';
   if (!fiasco) return;
