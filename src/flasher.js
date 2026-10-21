@@ -46,6 +46,7 @@ export function flashOnlySelection(images, names) {
 const MAIN_TYPES = new Set(['xloader', 'secondary', 'kernel', 'initfs', 'rootfs', 'moslo', 'mmc', 'tar']);
 const SW_REL_TYPES = new Set(['xloader', 'secondary', 'kernel', 'initfs', 'rootfs']);
 const MIN_BATTERY = 10;
+const BATTERY_POLL_MS = 1000;
 
 /** Scheduler group of an image in the original's table: a failure skips the rest of its group. */
 const suGroup = (img) => {
@@ -361,11 +362,30 @@ export class Flasher {
     }
   }
 
+  /**
+   * Like the original's -Owait-charging: while the battery is at or below
+   * MIN_BATTERY, poll it once a second until it charges, the user aborts or
+   * the device goes away.
+   */
   async #batteryGate(su) {
     let level;
-    try { level = await su.batteryLevel(); } catch { this.log('Unable to get SU_PARAM_BATTERY_LEVEL'); return; }
+    try { level = await su.batteryLevel(); } catch (e) {
+      if (e.code === 'disconnected') throw e;
+      this.log('Unable to get SU_PARAM_BATTERY_LEVEL');
+      return;
+    }
     if (level <= MIN_BATTERY) {
-      throw new ProtocolError(`BATTERY IS LOW (${level} %, ${MIN_BATTERY + 1} % required). Charge the device with the USB cable attached and retry.`);
+      this.log('BATTERY IS LOW. Waiting for the device to charge; keep the USB cable attached (Abort to give up).');
+      let shown = null;
+      while (level <= MIN_BATTERY) {
+        if (level !== shown) this.log(`Charging battery, ${shown = level} % battery level (${MIN_BATTERY + 1} % required)`);
+        await sleep(BATTERY_POLL_MS);
+        this.#check();
+        try { level = await su.batteryLevel(); } catch (e) {
+          if (e.code === 'disconnected') this.log('Device disconnected while charging.');
+          throw e;
+        }
+      }
     }
     this.log(`Battery level ${level} %, continuing.`);
   }
@@ -546,6 +566,7 @@ export class Flasher {
     if (s.mode !== 'phonet' && fiasco) s = await this.enterSu(fiasco);
     if (s.mode !== 'phonet') throw new ProtocolError('Erase not supported. Use APE flashing algorithm (load a firmware file that contains ape-algo).');
     const su = await this.#suReady();
+    this.aborted = false;
     await this.#batteryGate(su);
     await this.#erase(su, what, method);
   }

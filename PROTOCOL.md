@@ -283,7 +283,7 @@ Protocol-version feature gates: `≥101` cancel update (0x65), `≥102` error li
 | `/device/nand/part_table/version` | set | repartition |
 | `/device/product_code`, `/device/hw_build` | get | |
 | `/device/hw_build_override` | set | `--hw-revision` style override |
-| `/device/battery_level` | get | decimal %. **Not read by default**: the server enforces its own limit, and BEGIN_UPDATE / BEGIN_ERASE then fail with status 11 (`-9`), which prints "BATTERY IS LOW. DEVICE IS NOW CHARGING." and the level. Only with `-Owait-charging` does the host poll it before BEGIN_UPDATE / BEGIN_ERASE, waiting once a second while it is ≤ 10 % ("%d %% required" prints 11). The web version always refuses at ≤ 10 % before flashing or erasing; its "skip battery check" skips only that local check and does not set `/update/no_battery_level_check` |
+| `/device/battery_level` | get | decimal %. **Not read by default**: the server enforces its own limit, and BEGIN_UPDATE / BEGIN_ERASE then fail with status 11 (`-9`), which prints "BATTERY IS LOW. DEVICE IS NOW CHARGING." and the level. Only with `-Owait-charging` does the host poll it before BEGIN_UPDATE / BEGIN_ERASE, waiting once a second while it is ≤ 10 % ("%d %% required" prints 11). The web version always does that wait before flashing or erasing (until the level is ≥ 11 %, the user aborts or the device is unplugged); its "skip battery check" skips only that local check and does not set `/update/no_battery_level_check` |
 | `/device/rd_mode` | get/set | see 5.8 |
 
 ### 5.6 Flashing one sub-image (`FUN_004115b1`, `FUN_00411344`)

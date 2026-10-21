@@ -5,7 +5,7 @@ import {
   SuClient, NoloClient, ColdFlash, noloCanSetRd, classifyUsbId, parseRdFlags, rdFlagNames, imageHash, SuError, hex, concat, TransportError,
 } from '../src/protocol.js';
 import { buildFiasco, parseFiasco, pickImage, mergeFiascos, verifyImageHash } from '../src/fiasco.js';
-import { Flasher, flashOnlySelection } from '../src/flasher.js';
+import { Flasher, Cancelled, flashOnlySelection } from '../src/flasher.js';
 import { FakeSuServer, FakeNolo, FakeBootRom, FakeHost } from './fakes.js';
 
 const rnd = (n, seed = 1) => { const a = new Uint8Array(n); let x = seed; for (let i = 0; i < n; i++) { x = (x * 1103515245 + 12345) >>> 0; a[i] = x >>> 24; } return a; };
@@ -195,12 +195,36 @@ test('SU flash order: cert-sw, then xloader, then CMT; tar dropped with rootfs',
   assert.deepEqual(srv.images.map((i) => i.type), ['cert-sw', 'xloader', 'cmt-2nd', 'kernel', 'rootfs']);
 });
 
-test('flash aborts on low battery and on server-reported failure', async () => {
+test('low battery: waits for it to charge to 11 %, unless aborted or unplugged', async () => {
   const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({ images: [{ type: 'kernel', data: rnd(4096, 9) }] })) }]);
   const low = new FakeSuServer({ battery: 5 });
-  await assert.rejects(new Flasher(new FakeHost([sessionFor(low)])).flash(fi, new Set([0])), /BATTERY IS LOW/);
-  assert.equal(low.images.length, 0);
+  const logs = [];
+  setTimeout(() => low.params.set('/device/battery_level', '10'), 300);
+  setTimeout(() => low.params.set('/device/battery_level', '11'), 1500);
+  await new Flasher(new FakeHost([sessionFor(low)]), { log: (m) => logs.push(m) }).flash(fi, new Set([0]), { reboot: false });
+  assert.equal(low.images.length, 1);
+  assert.ok(logs.some((l) => /Charging battery, 5 % battery level \(11 % required\)/.test(l)));
+  assert.ok(logs.some((l) => /Charging battery, 10 %/.test(l)));
+  assert.ok(logs.includes('Battery level 11 %, continuing.'));
 
+  const stuck = new FakeSuServer({ battery: 5 });
+  const fl = new Flasher(new FakeHost([sessionFor(stuck)]));
+  setTimeout(() => fl.abort(), 300);
+  await assert.rejects(fl.flash(fi, new Set([0])), Cancelled);
+  assert.equal(stuck.images.length, 0);
+
+  const gone = new FakeSuServer({ battery: 5 });
+  const s = sessionFor(gone);
+  const out = s.transport.bulkOut;
+  let unplugged = false;
+  s.transport.bulkOut = async (ep, d) => { if (unplugged) throw new TransportError('gone', 'disconnected'); return out(ep, d); };
+  setTimeout(() => { unplugged = true; }, 300);
+  await assert.rejects(new Flasher(new FakeHost([s])).erase('userdata'), (e) => e.code === 'disconnected');
+  assert.ok(!gone.seen.includes(0x12)); // no BEGIN_ERASE
+});
+
+test('flash aborts on server-reported failure', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({ images: [{ type: 'kernel', data: rnd(4096, 9) }] })) }]);
   const bad = new FakeSuServer({ failImage: 'kernel' });
   const fl = new Flasher(new FakeHost([sessionFor(bad)]));
   await assert.rejects(fl.flash(fi, new Set([0])), /Update failed/);
