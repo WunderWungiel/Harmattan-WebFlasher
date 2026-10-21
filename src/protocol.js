@@ -652,6 +652,14 @@ export class SuClient {
     if (v > PROTOCOL_MAX) throw new SuError(`Image contains a server with more recent version of the protocol ${Math.floor(v / 100)}.${v % 100}. You have to update the flasher client`);
     this.version = v;
     await this.setParam('/update/host_protocol_version', String(HOST_PROTOCOL));
+    // The original refuses servers older than 1.4.8: they may overwrite the certificates.
+    const app = await this.getParam('/update/application_info');
+    this.log(`Server application: ${app}`);
+    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(app);
+    const [maj, min, pat] = m ? m.slice(1).map(Number) : [0, 0, 0];
+    if (!m || !(maj > 1 || (maj === 1 && (min > 4 || (min === 4 && pat >= 8))))) {
+      throw new SuError('Refusing to continue: Image contains a deprecated server. In worst case flashing with deprecated software may overwrite the certificates and render your device unusable.');
+    }
     const product = await this.getParam('/device/product_code');
     const hwBuild = await this.getParam('/device/hw_build');
     this.log(`Found product ${product} rev. ${hwBuild}`);

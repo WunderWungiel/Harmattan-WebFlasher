@@ -8,9 +8,10 @@ const be64 = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBig
 
 /** An SU (softupd) server speaking ISI over a fake bulk pipe. */
 export class FakeSuServer {
-  constructor({ protocol = 108, product = 'RM-696', hwBuild = '2101', battery = 80, failImage = null, rdMode = '' } = {}) {
+  constructor({ protocol = 108, appInfo = '1.4.8', product = 'RM-696', hwBuild = '2101', battery = 80, failImage = null, rdMode = '' } = {}) {
     this.params = new Map([
       ['/update/protocol_version', String(protocol)],
+      ['/update/application_info', appInfo],
       ['/device/product_code', product],
       ['/device/hw_build', hwBuild],
       ['/update/supported_images', 'cert-sw,cmt-2nd,cmt-algo,cmt-mcusw,xloader,secondary,kernel,moslo,rootfs,mmc,tar,config'],

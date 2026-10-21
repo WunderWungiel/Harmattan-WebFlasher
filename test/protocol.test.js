@@ -125,6 +125,9 @@ test('SuClient init handshake and error mapping', async () => {
   await assert.rejects(old.init(), /deprecated/);
   const newer = new SuClient(new FakeSuServer({ protocol: 120 }).transport());
   await assert.rejects(newer.init(), /more recent/);
+  const oldApp = new SuClient(new FakeSuServer({ appInfo: '1.4.7' }).transport());
+  await assert.rejects(oldApp.init(), /deprecated server/);
+  assert.ok(await new SuClient(new FakeSuServer({ appInfo: '2.0.0' }).transport()).init());
 });
 
 test('SuClient times out and reports it', async () => {
