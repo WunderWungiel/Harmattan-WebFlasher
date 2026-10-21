@@ -177,7 +177,7 @@ Identify blocks (`FUN_0040d5d8`): repeated `{ char name[14]; u16 len; u8 data[le
 
 NOLO init (`FUN_0040b069`) fails, and nothing else is done over NOLO, when: the status read fails, `prod_code` is missing ("Product code not found"), `hw_rev` is missing ("HW revision not found"), GET_NOLO_VERSION fails or does not return exactly 4 bytes ("Unable to get bootloader version" / "Bootloader might be too old"), or the API byte is ≥ 2. Only the `version:sw-release` string is optional.
 
-**R&D setter gate**: the NOLO context is set up with its R&D setter slot (`ctx+0x38`) empty and `FUN_0040d1da` in `ctx+0x40` (the query hook). `FUN_0040b069` then does `ctx[7] = ctx[8]` when the NOLO version (`v >> 8`, i.e. major/minor/patch) is **outside** `0x1509…0x1604` (1.5.9 – 1.6.4). So outside that window NOLO can *set* R&D mode and flags itself (section 5.8); inside it, setting them needs the APE algorithm.
+**R&D setter gate**: the NOLO context is set up with its R&D setter slot (`ctx+0x38`) empty and `FUN_0040d1da` in `ctx+0x40` (the query hook). `FUN_0040b069` then does `ctx[7] = ctx[8]` when the NOLO version (`v >> 8` of the whole word, signed `sar` at `0x40b16f`, so not masked to major/minor/patch: a non-zero top byte counts too) is **outside** `0x1509…0x1604` (1.5.9 – 1.6.4). So outside that window NOLO can *set* R&D mode and flags itself (section 5.8); inside it, setting them needs the APE algorithm.
 
 **Loading ape-algo** (`FUN_0040b91d` with mask 0x1000): `SEND_IMAGE(0x42, blob)` → bulk write of the 128-byte-padded, `0xFF`-filled payload (6.2), in chunks of ≤ 0x20000 → done. The extra `usleep(100 ms)` after the data. Kernel/initfs identical (masks 2 / 4). CMT images (`cmt-2nd`, `cmt-algo`, `cmt-mcusw`) are sent in that order with the same procedure.
 

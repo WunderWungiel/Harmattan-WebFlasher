@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   xloaderMessage, xloaderCrc32, isiBuild, isiParse, parseConfigDescriptor, findPhonetInterface,
-  SuClient, NoloClient, ColdFlash, classifyUsbId, parseRdFlags, rdFlagNames, imageHash, SuError, hex, concat, TransportError,
+  SuClient, NoloClient, ColdFlash, noloCanSetRd, classifyUsbId, parseRdFlags, rdFlagNames, imageHash, SuError, hex, concat, TransportError,
 } from '../src/protocol.js';
 import { buildFiasco, parseFiasco, pickImage, mergeFiascos, verifyImageHash } from '../src/fiasco.js';
 import { Flasher } from '../src/flasher.js';
@@ -471,4 +471,15 @@ test('a failed /update/mmc/no_preserve is reported but the update goes on', asyn
   assert.ok(logs.includes('Unable to set MMC no preserve'));
   assert.deepEqual(srv.images.map((i) => i.type), ['kernel']);
   assert.ok(srv.finished);
+});
+
+test('NOLO R&D gate compares the whole version word >> 8, signed, like the original', () => {
+  const at = (w) => noloCanSetRd({ word: w >>> 0 });
+  assert.equal(at(0x00150901), false); // 1.5.9
+  assert.equal(at(0x00160401), false); // 1.6.4
+  assert.equal(at(0x00150801), true);  // 1.5.8
+  assert.equal(at(0x00160501), true);  // 1.6.5
+  assert.equal(at(0x01150901), true);  // top byte set: 0x11509 > 0x1604
+  assert.equal(at(0x80150901), true);  // negative after sar
+  assert.equal(noloCanSetRd(null), false);
 });

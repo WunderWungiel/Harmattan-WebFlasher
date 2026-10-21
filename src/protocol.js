@@ -345,10 +345,15 @@ export function parseRdFlags(list) {
 }
 
 /**
- * The original installs its NOLO R&D setter only when the NOLO version
- * (bits 8..23 of the version word) is outside 0x1509..0x1604.
+ * The original installs its NOLO R&D setter only when the NOLO version is
+ * outside 1.5.9-1.6.4. It compares the whole version word shifted right
+ * by 8, signed (`sar` at 0x40b16f), so the top byte takes part too.
  */
-export const noloCanSetRd = (nolo) => !!nolo && (nolo.patch < 0x1509 || nolo.patch > 0x1604);
+export const noloCanSetRd = (nolo) => {
+  if (!nolo) return false;
+  const v = nolo.word >> 8;
+  return v < 0x1509 || v > 0x1604;
+};
 
 export class NoloClient {
   constructor(transport, { log = () => {} } = {}) { this.t = transport; this.log = log; }
@@ -424,7 +429,7 @@ export class NoloClient {
     const b = await this.#in(NOLO.GET_VERSION, 0, 0, 4);
     if (b.length !== 4) throw new ProtocolError(`Device returned ${b.length} version bytes (we want 4)`);
     const v = view(b).getUint32(0, true);
-    return { text: `${(v >>> 20) & 15}.${(v >>> 16) & 15}.${(v >>> 8) & 255}`, patch: (v >>> 8) & 0xffff, api: v & 255 };
+    return { text: `${(v >>> 20) & 15}.${(v >>> 16) & 15}.${(v >>> 8) & 255}`, word: v, api: v & 255 };
   }
 
   async getString(key) {
