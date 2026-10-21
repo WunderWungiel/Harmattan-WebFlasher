@@ -232,8 +232,25 @@ test('NOLO identify (-i) reports product, version, R&D state', async () => {
   assert.equal(info.hwRev, '2101');
   assert.deepEqual(info.rdFlags, ['no-omap-wd', 'serial-console']);
   assert.equal(info.swRelease, 'RM-696_TEST');
-  await new NoloClient(nolo.transport()).setRdFlags(0x08);
-  assert.equal(nolo.rd.flags, 0x08);
+  assert.equal(info.rdMode, 0);
+  nolo.rd.flags = 0x13;
+  const rd = await new Flasher(new FakeHost([{ mode: 'nolo', transport: nolo.transport(), usb: { vid: 0x421, pid: 0x105 } }])).identify();
+  assert.equal(rd.rdMode, 1);
+  assert.deepEqual(rd.rdFlags, ['no-omap-wd', 'serial-console']);
+});
+
+test('R&D changes need SU: refused over NOLO, "-{*}" to disable over SU', async () => {
+  const nolo = new FakeNolo();
+  const fl = new Flasher(new FakeHost([{ mode: 'nolo', transport: nolo.transport(), usb: { vid: 0x421, pid: 0x105 } }]));
+  await assert.rejects(fl.setRdFlags('serial-console', 'set'), /APE flashing algorithm/);
+  await assert.rejects(fl.setRdMode(true), /APE flashing algorithm/);
+
+  const srv = new FakeSuServer();
+  const su = new Flasher(new FakeHost([sessionFor(srv)]));
+  await su.setRdMode(false);
+  assert.equal(srv.params.get('/device/rd_mode'), '-{*}');
+  await su.setRdFlags('serial-console', 'set');
+  assert.equal(srv.params.get('/device/rd_mode'), '+{serial-console}');
 });
 
 test('cold flash sequence', async () => {

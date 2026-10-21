@@ -120,11 +120,12 @@ export class Flasher {
       const n = await nolo.init();
       Object.assign(info, { product: n.product, hwRev: n.hwRev, nolo: n.nolo?.text, swRelease: n.swRelease });
       try {
-        const flags = await nolo.getRdFlags();
-        info.rdMode = await nolo.getRdMode();
+        const word = await nolo.getRdFlags();
+        const flags = word & ~RD_FLAGS.master;
+        info.rdMode = word & RD_FLAGS.master;
         info.rdFlags = rdFlagNames(flags);
-        this.log(`The device is in ${info.rdMode ? 'R&D' : 'normal'} mode`);
-        this.log(`R&D flags (0x${flags.toString(16).padStart(4, '0')}): ${info.rdFlags.join(',')}`);
+        this.log(`The device is in ${info.rdMode ? 'R&D' : 'production'} mode`);
+        this.log(`R&D flags ${info.rdMode ? '' : '(not effective) '}(0x${flags.toString(16).padStart(4, '0')}): ${info.rdFlags.join(',') || '(none)'}`);
       } catch (e) { this.log(`R&D query failed: ${e.message}`, 1); }
     } else if (SYNC_MODE_PIDS.includes(s.usb.pid)) {
       this.log('The phone is in Sync / PC Suite mode: the Phonet interface is claimable, but no flashing server is running.');
@@ -360,25 +361,30 @@ export class Flasher {
     await this.#nolo().boot(cmdline);
   }
 
-  async setRdMode(on) {
-    const s = this.session ?? await this.connect(['nolo', 'phonet']);
-    if (s.mode === 'nolo') return this.#nolo().setRdMode(on);
-    const su = await this.#suReady();
-    await su.setRdMode(on ? { add: ['master'] } : { remove: ['master'] });
-    this.log(`The device is now in ${on ? 'R&D' : 'normal'} mode`);
+  /**
+   * R&D settings can only be changed through the SU server (the original has
+   * no setter over NOLO). With a FIASCO that carries ape-algo, boot it first.
+   */
+  async #rdSu(fiasco, what) {
+    let s = this.session ?? await this.connect(['nolo', 'phonet', 'bootrom']);
+    if (s.mode !== 'phonet' && fiasco) s = await this.enterSu(fiasco);
+    if (s.mode !== 'phonet') {
+      throw new ProtocolError(`Method is not supported in the current mode. Please, provide the APE flashing algorithm to set the R&D ${what} (load a firmware file that contains ape-algo).`);
+    }
+    return this.#suReady();
   }
 
-  /** flagList: "no-lifeguard-reset,serial-console"; mode 'set' | 'clear' */
-  async setRdFlags(flagList, mode = 'set') {
-    const s = this.session ?? await this.connect(['nolo', 'phonet']);
+  async setRdMode(on, fiasco = null) {
+    const su = await this.#rdSu(fiasco, 'mode');
+    // Disabling clears every flag, like the original ("-{*}").
+    await su.setRdMode(on ? { add: ['master'] } : { removeAll: true });
+    this.log(`The device is now in ${on ? 'R&D' : 'production'} mode`);
+  }
+
+  /** flagList: "no-lifeguard-reset,serial-console"; mode 'set' (add) | 'clear' (remove) */
+  async setRdFlags(flagList, mode = 'set', fiasco = null) {
     const mask = flagList ? parseRdFlags(flagList) : 0;
-    if (s.mode === 'nolo') {
-      const nolo = this.#nolo();
-      const cur = await nolo.getRdFlags();
-      await nolo.setRdFlags(mode === 'set' ? mask : cur & ~mask);
-      return;
-    }
-    const su = await this.#suReady();
+    const su = await this.#rdSu(fiasco, 'flags');
     const names = Object.entries(RD_FLAGS).filter(([k, v]) => k !== 'master' && mask & v).map(([k]) => k);
     if (!flagList && mode === 'clear') await su.setRdMode({ removeAll: true });
     else if (mode === 'set') await su.setRdMode({ add: names });

@@ -448,24 +448,13 @@ export class NoloClient {
     return info;
   }
 
-  async getRdMode() {
-    const b = await this.#in(NOLO.GET, 0, NOLO.IDX_RD_MODE, 1);
-    return b[0] ? 1 : 0;
-  }
-  async setRdMode(on) {
-    this.log(`${on ? 'Enabling' : 'Disabling'} R&D mode...`);
-    await this.#out(NOLO.SET, on ? 1 : 0, NOLO.IDX_RD_MODE);
-  }
+  /**
+   * R&D flag word (bit 0 = R&D mode). Read-only here: like the original,
+   * changing R&D mode or flags needs the APE algorithm (SU).
+   */
   async getRdFlags() {
     const b = await this.#in(NOLO.GET, 0, NOLO.IDX_ADD_RD_FLAGS, 2);
     return view(b).getUint16(0, true);
-  }
-  /** Replace the whole flag set. */
-  async setRdFlags(mask) {
-    const add = mask & ~RD_FLAGS.master;
-    const del = ~add & 0x1fe;
-    await this.#out(NOLO.SET, add, NOLO.IDX_ADD_RD_FLAGS);
-    await this.#out(NOLO.SET, del, NOLO.IDX_DEL_RD_FLAGS);
   }
 
   /**
