@@ -743,7 +743,8 @@ export class SuClient {
     const raw = v.getUint32(0);
     return {
       state: raw & 0xffff, stateName: SU_STATES[raw & 0xffff] ?? `unknown_${(raw & 0xffff).toString(16)}`,
-      failed: !!(raw & 0x10000),
+      // FUN_0040fc27 checks for 'finished' (0x10) first, so 0x10010 is finished, not failed.
+      failed: (raw & 0xffff) !== 0x10 && !!(raw & 0x10000),
       done: Number(v.getBigUint64(4)), total: Number(v.getBigUint64(12)),
     };
   }

@@ -677,3 +677,17 @@ test('-l also loads the CMT images when a cmt-algo is there, and then needs all 
     .loadAndBoot(build(['kernel', 'cmt-algo', 'cmt-2nd'])), /CMT MCUSW image is required/);
   assert.equal(short.booted, null);
 });
+
+test('GET_UPDATE_STATUS: finished wins over the failed bit, like FUN_0040fc27', async () => {
+  const be = (n, bytes) => { const b = new Uint8Array(bytes); let x = BigInt(n); for (let i = bytes - 1; i >= 0; i--) { b[i] = Number(x & 255n); x >>= 8n; } return b; };
+  const status = (trid, state) => {
+    const b = isiBuild({ trid, id: 0x26, payload: concat(be(state, 4), be(10, 8), be(10, 8), Uint8Array.of(0)) });
+    b[1] = 0x10; b[2] = 0x00; return b;
+  };
+  const q = [status(0, 0x10010), status(1, 0x10003)];
+  const su = new SuClient({ bulkOut: async () => {}, bulkIn: async () => q.shift() ?? null });
+  const done = await su.getStatus(1);
+  assert.equal(done.stateName, 'finished');
+  assert.equal(done.failed, false);
+  assert.equal((await su.getStatus(1)).failed, true);
+});
