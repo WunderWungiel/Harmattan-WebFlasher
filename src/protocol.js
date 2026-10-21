@@ -346,6 +346,12 @@ export function parseRdFlags(list) {
   return m;
 }
 
+/**
+ * The original installs its NOLO R&D setter only when the NOLO version
+ * (bits 8..23 of the version word) is outside 0x1509..0x1604.
+ */
+export const noloCanSetRd = (nolo) => !!nolo && (nolo.patch < 0x1509 || nolo.patch > 0x1604);
+
 export class NoloClient {
   constructor(transport, { log = () => {} } = {}) { this.t = transport; this.log = log; }
 
@@ -448,13 +454,18 @@ export class NoloClient {
     return info;
   }
 
-  /**
-   * R&D flag word (bit 0 = R&D mode). Read-only here: like the original,
-   * changing R&D mode or flags needs the APE algorithm (SU).
-   */
+  /** R&D flag word (bit 0 = R&D mode). */
   async getRdFlags() {
     const b = await this.#in(NOLO.GET, 0, NOLO.IDX_ADD_RD_FLAGS, 2);
     return view(b).getUint16(0, true);
+  }
+  /**
+   * Add / delete R&D flag bits (bit 0 = R&D mode). The original only allows
+   * this when the NOLO version is outside 1.5.9-1.6.4 (see noloCanSetRd).
+   */
+  async setRdFlags({ add = 0, del = 0 }) {
+    if (add) await this.#out(NOLO.SET, add, NOLO.IDX_ADD_RD_FLAGS);
+    if (del) await this.#out(NOLO.SET, del, NOLO.IDX_DEL_RD_FLAGS);
   }
 
   /**

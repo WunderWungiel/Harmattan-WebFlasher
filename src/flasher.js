@@ -10,7 +10,7 @@
 // release() + acquire(), so the host decides how to find the next device.
 import {
   ColdFlash, NoloClient, SuClient, SuError, ProtocolError, TransportError,
-  SYNC_MODE_PIDS, rdFlagNames, parseRdFlags, RD_FLAGS, sleep,
+  SYNC_MODE_PIDS, rdFlagNames, parseRdFlags, RD_FLAGS, sleep, noloCanSetRd,
 } from './protocol.js';
 import { pickImage, readPadded } from './fiasco.js';
 
@@ -362,29 +362,41 @@ export class Flasher {
   }
 
   /**
-   * R&D settings can only be changed through the SU server (the original has
-   * no setter over NOLO). With a FIASCO that carries ape-algo, boot it first.
+   * Where to change R&D settings, like the original: with a FIASCO that
+   * carries ape-algo, boot it and use SU; otherwise NOLO can do it itself
+   * when its version allows (noloCanSetRd). Returns {nolo} or {su}.
    */
-  async #rdSu(fiasco, what) {
+  async #rdTarget(fiasco, what) {
     let s = this.session ?? await this.connect(['nolo', 'phonet', 'bootrom']);
-    if (s.mode !== 'phonet' && fiasco) s = await this.enterSu(fiasco);
+    const hasApe = !!fiasco?.images.some((i) => i.type === 'ape-algo');
+    if (s.mode === 'nolo' && !hasApe) {
+      const nolo = this.#nolo();
+      if (noloCanSetRd((await nolo.init()).nolo)) return { nolo };
+    }
+    if (s.mode !== 'phonet' && hasApe) s = await this.enterSu(fiasco);
     if (s.mode !== 'phonet') {
       throw new ProtocolError(`Method is not supported in the current mode. Please, provide the APE flashing algorithm to set the R&D ${what} (load a firmware file that contains ape-algo).`);
     }
-    return this.#suReady();
+    return { su: await this.#suReady() };
   }
 
   async setRdMode(on, fiasco = null) {
-    const su = await this.#rdSu(fiasco, 'mode');
-    // Disabling clears every flag, like the original ("-{*}").
-    await su.setRdMode(on ? { add: ['master'] } : { removeAll: true });
+    const { nolo, su } = await this.#rdTarget(fiasco, 'mode');
+    // Disabling clears every flag, like the original ("-{*}" / delete 0xffff).
+    if (nolo) await nolo.setRdFlags(on ? { add: RD_FLAGS.master } : { del: 0xffff });
+    else await su.setRdMode(on ? { add: ['master'] } : { removeAll: true });
     this.log(`The device is now in ${on ? 'R&D' : 'production'} mode`);
   }
 
   /** flagList: "no-lifeguard-reset,serial-console"; mode 'set' (add) | 'clear' (remove) */
   async setRdFlags(flagList, mode = 'set', fiasco = null) {
-    const mask = flagList ? parseRdFlags(flagList) : 0;
-    const su = await this.#rdSu(fiasco, 'flags');
+    const mask = flagList ? parseRdFlags(flagList) & ~RD_FLAGS.master : 0;
+    const { nolo, su } = await this.#rdTarget(fiasco, 'flags');
+    if (nolo) {
+      if (mode === 'set') await nolo.setRdFlags({ add: mask });
+      else await nolo.setRdFlags({ del: flagList ? mask : 0xffff });
+      return;
+    }
     const names = Object.entries(RD_FLAGS).filter(([k, v]) => k !== 'master' && mask & v).map(([k]) => k);
     if (!flagList && mode === 'clear') await su.setRdMode({ removeAll: true });
     else if (mode === 'set') await su.setRdMode({ add: names });

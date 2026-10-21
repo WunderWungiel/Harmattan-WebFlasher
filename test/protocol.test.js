@@ -239,11 +239,23 @@ test('NOLO identify (-i) reports product, version, R&D state', async () => {
   assert.deepEqual(rd.rdFlags, ['no-omap-wd', 'serial-console']);
 });
 
-test('R&D changes need SU: refused over NOLO, "-{*}" to disable over SU', async () => {
-  const nolo = new FakeNolo();
-  const fl = new Flasher(new FakeHost([{ mode: 'nolo', transport: nolo.transport(), usb: { vid: 0x421, pid: 0x105 } }]));
-  await assert.rejects(fl.setRdFlags('serial-console', 'set'), /APE flashing algorithm/);
-  await assert.rejects(fl.setRdMode(true), /APE flashing algorithm/);
+test('R&D over NOLO: allowed outside NOLO 1.5.9-1.6.4, refused inside; "-{*}" to disable over SU', async () => {
+  const nolo = new FakeNolo(); // 0.1.43: outside the window
+  const fl = () => new Flasher(new FakeHost([{ mode: 'nolo', transport: nolo.transport(), usb: { vid: 0x421, pid: 0x105 } }]));
+  nolo.rd.flags = 0x08;
+  await fl().setRdFlags('serial-console', 'set');
+  assert.equal(nolo.rd.flags, 0x18);
+  await fl().setRdMode(true);
+  assert.equal(nolo.rd.flags, 0x19);
+  await fl().setRdFlags('no-lifeguard-reset', 'clear');
+  assert.equal(nolo.rd.flags, 0x11);
+  await fl().setRdMode(false);
+  assert.equal(nolo.rd.flags, 0);
+
+  const win = new FakeNolo({ version: (1 << 20) | (5 << 16) | (0x09 << 8) | 1 }); // 1.5.9: inside
+  const fw = new Flasher(new FakeHost([{ mode: 'nolo', transport: win.transport(), usb: { vid: 0x421, pid: 0x105 } }]));
+  await assert.rejects(fw.setRdMode(true), /APE flashing algorithm/);
+  assert.equal(win.rd.flags, 0);
 
   const srv = new FakeSuServer();
   const su = new Flasher(new FakeHost([sessionFor(srv)]));

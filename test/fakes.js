@@ -144,9 +144,9 @@ export class FakeSuServer {
 
 /** NOLO bootloader fake (vendor control requests + bulk EP2). */
 export class FakeNolo {
-  constructor({ product = 'RM-696', hwRev = '2101', version = 0x01503ff00 >>> 0 } = {}) {
+  constructor({ product = 'RM-696', hwRev = '2101', version = (0 << 20) | (1 << 16) | (0x2b << 8) | 1 /* 0.1.43 api 1 */ } = {}) {
     this.product = product; this.hwRev = hwRev;
-    this.version = (0 << 20) | (1 << 16) | (0x2b << 8) | 1; // 0.1.43 api 1
+    this.version = version;
     this.strings = new Map([['version:sw-release', 'RM-696_TEST']]);
     this.sent = [];
     this.bulk = [];

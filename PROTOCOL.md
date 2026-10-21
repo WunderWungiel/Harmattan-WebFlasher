@@ -175,7 +175,7 @@ Pure vendor control transfers on EP0 plus bulk OUT on EP2 for payloads. Interfac
 
 Identify blocks (`FUN_0040d5d8`): repeated `{ char name[14]; u16 len; u8 data[len] }` records. The record header is 16 bytes with the length at offset 14. `len` must be a multiple of 4. The tool reads `prod_code` (e.g. `RM-696`) and `hw_rev` (decimal string). `sw-release` / `kernel` / `initfs` / `nolo` / `content` versions come from `STRING`/`GET_STRING` with key `version:<name>` **[0xFFFF]**.
 
-**Quirk**: when the NOLO version (patch field) is **outside** `0x1509…0x1604` (the code path at `FUN_0040b069`), the tool replaces a function pointer in the NOLO context (`ctx[7] = ctx[8]`); inside that window the default is kept. The exact consequence is not recovered **[infer]**, probably an alternate send function.
+**R&D setter gate**: the NOLO context is set up with its R&D setter slot (`ctx+0x38`) empty and `FUN_0040d1da` in `ctx+0x40` (the query hook). `FUN_0040b069` then does `ctx[7] = ctx[8]` when the NOLO version (`v >> 8`, i.e. major/minor/patch) is **outside** `0x1509…0x1604` (1.5.9 – 1.6.4). So outside that window NOLO can *set* R&D mode and flags itself (section 5.8); inside it, setting them needs the APE algorithm.
 
 **Loading ape-algo** (`FUN_0040b91d` with mask 0x1000): `SEND_IMAGE(0x42, blob)` → bulk write of the 128-byte-padded, `0xFF`-filled payload (6.2), in chunks of ≤ 0x20000 → done. The extra `usleep(100 ms)` after the data. Kernel/initfs identical (masks 2 / 4). CMT images (`cmt-2nd`, `cmt-algo`, `cmt-mcusw`) are sent in that order with the same procedure.
 
@@ -327,7 +327,7 @@ Then the device re-enumerates. In `main`, after this reboot the tool re-opens th
 - get: reply parsed to a bitmask (`The device is in %s mode`, `R&D flags %s(0x%04x): %s`). Bit 0 (`master`) is the R&D mode; the other bits are printed with `(not effective) ` when it is clear.
 - `--enable-rd-mode` sends `+{master}`. `--disable-rd-mode` sends `-{*}`, which clears **all** flags, not just `master`. `--set-rd-flags=F` only adds `F`, `--clear-rd-flags=F` only removes `F`.
 
-Over **NOLO**, 3.12 can only *query*: `GET` index 3 (u16) returns the flag word, and the mode is its bit 0 (index 0 is not read). The NOLO context's setter slot is NULL (`FUN_0040d1da` is installed only as the query hook), so enabling/disabling R&D mode or setting flags fails with "Method is not supported in the current mode. Please, provide the APE flashing algorithm to set the R&D mode/flags." When a FIASCO with ape-algo is given, `main` boots it first and sets the flags over SU. (0xFFFF does write `SET` index 0/3/4 over NOLO; the Nokia tool does not.)
+Over **NOLO**, `FUN_0040d1da(add, del, query)` sends `SET` value=`add` index 3, then `SET` value=`del` index 4 (each only when non-zero), and reads the flag word with `GET` index 3 (u16); the mode is its bit 0 (index 0 is never used). `--enable-rd-mode` = add `0x1`, `--disable-rd-mode` = delete `0xFFFF` (all flags), `--set-rd-flags=F` = add `F`, `--clear-rd-flags=F` = delete `F`. Querying always works; setting works only when the NOLO version is outside 1.5.9 – 1.6.4 (section 4). Otherwise the tool prints "Method is not supported in the current mode. Please, provide the APE flashing algorithm to set the R&D mode/flags." When a FIASCO with ape-algo is given, `main` boots it first and the flags are set over SU.
 
 Messages in the original that the log mirrors: `Server implements softupd protocol version 1.08`, `Found product RM-696 rev. 2102`, `Supported images: …`, `Image SW version …`, `Updating SW release`, `Success`.
 
@@ -396,11 +396,10 @@ Per-image matching (`FUN_00406dc7`): images of the requested type are walked **i
 ## 7. Open questions (verify on hardware)
 
 1. Exact bytes of `FUN_00414428`/`FUN_00414330` Phonet interface matching for the N9 vs the N950. The structural rules in 2.1 come from the decompile; confirm with `lsusb -v` on both devices in NOLO→ape-algo mode.
-2. What the function pointer swapped outside the NOLO version window `0x1509…0x1604` actually does (section 4).
-3. Aux-pipe use is decided in `FUN_00411344`: image group == 2 (eMMC rootfs, `mmc`), a raw data EP was found (`ctx+0x18 > 0`), and the image is not `tar`. Whether the N9/N950 SU server actually exposes the class-0xFF raw interface still needs a capture.
-4. Whether BEGIN_IMAGE_UPDATE accepts blobs from FIASCO images unchanged for `config`/`tar`/`cert-sw`. Not exercised in the strings.
-5. Certificate and challenge/response commands (`common_*_cert`, NOLO `0x60-0x62`) are present but not reachable from the CLI of this build. They are out of scope for the web app.
-6. Timing: the original sleeps 10 ms between cold-flash writes, 50 ms after boot ROM transfers and 100 ms after NOLO image uploads. Keep these in `protocol.js`.
+2. Aux-pipe use is decided in `FUN_00411344`: image group == 2 (eMMC rootfs, `mmc`), a raw data EP was found (`ctx+0x18 > 0`), and the image is not `tar`. Whether the N9/N950 SU server actually exposes the class-0xFF raw interface still needs a capture.
+3. Whether BEGIN_IMAGE_UPDATE accepts blobs from FIASCO images unchanged for `config`/`tar`/`cert-sw`. Not exercised in the strings.
+4. Certificate and challenge/response commands (`common_*_cert`, NOLO `0x60-0x62`) are present but not reachable from the CLI of this build. They are out of scope for the web app.
+5. Timing: the original sleeps 10 ms between cold-flash writes, 50 ms after boot ROM transfers and 100 ms after NOLO image uploads. Keep these in `protocol.js`.
 
 ## 8. Next steps (after you review this file)
 
