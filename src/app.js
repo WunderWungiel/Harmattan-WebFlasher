@@ -331,7 +331,7 @@ function renderImages() {
     body.append(tr);
   }
 }
-// ---- Flash only (--flash-only=LIST, -M)
+// ---- Flash only (--flash-only=LIST; -M is the mmc group)
 
 const rowBoxes = () => [...document.querySelectorAll('#images input[type=checkbox]:not(:disabled)')];
 
@@ -375,11 +375,11 @@ function syncFlashOnly() {
   }
 }
 
-$('btn-fo-mmc').onclick = () => applyFlashOnly(['mmc']);
 $('btn-fo-default').onclick = () => {
   for (const c of rowBoxes()) c.checked = flashByDefault(fiasco.images[+c.dataset.index]);
   refresh();
 };
+$('btn-fo-clear').onclick = () => applyFlashOnly([]);
 
 const fmtSize = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MiB` : `${Math.ceil(n / 1024)} kB`);
 const selectedIndexes = () => new Set([...document.querySelectorAll('#images input[type=checkbox]:checked')].map((c) => +c.dataset.index));
