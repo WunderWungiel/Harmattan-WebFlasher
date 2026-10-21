@@ -171,6 +171,15 @@ test('full SU flash: kernel (feed) + rootfs (raw pipe) + reboot', async () => {
   assert.ok(logs.some((l) => /Success/.test(l)));
 });
 
+test('SU flash order: cert-sw, then xloader, then CMT; tar dropped with rootfs', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: ['cmt-2nd', 'kernel', 'xloader', 'tar', 'rootfs', 'cert-sw'].map((type, i) => ({ type, data: rnd(256, i + 1) })),
+  })) }]);
+  const srv = new FakeSuServer();
+  await new Flasher(new FakeHost([sessionFor(srv)])).flash(fi, new Set(fi.images.map((i) => i.index)), { reboot: false });
+  assert.deepEqual(srv.images.map((i) => i.type), ['cert-sw', 'xloader', 'cmt-2nd', 'kernel', 'rootfs']);
+});
+
 test('flash aborts on low battery and on server-reported failure', async () => {
   const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({ images: [{ type: 'kernel', data: rnd(4096, 9) }] })) }]);
   const low = new FakeSuServer({ battery: 5 });

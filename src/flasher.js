@@ -14,8 +14,14 @@ import {
 } from './protocol.js';
 import { pickImage, readPadded } from './fiasco.js';
 
-/** Order in which sub-images are flashed over SU (same as the original's table). */
+/** Sub-images that can be flashed over SU, in the order of the original's table. */
 export const SU_FLASH_ORDER = ['cert-sw', 'cmt-2nd', 'cmt-algo', 'cmt-mcusw', 'xloader', 'secondary', 'kernel', 'moslo', 'rootfs', 'mmc', 'tar', 'config'];
+/**
+ * Order in which they are actually flashed. The original's scheduler starts
+ * nothing before cert-sw is done and holds every other image (CMT included)
+ * until xloader/secondary are done; we flash one image at a time in that order.
+ */
+const SU_SEQUENCE = ['cert-sw', 'xloader', 'secondary', ...SU_FLASH_ORDER.filter((t) => !['cert-sw', 'xloader', 'secondary'].includes(t))];
 const MAIN_TYPES = new Set(['xloader', 'secondary', 'kernel', 'initfs', 'rootfs', 'moslo', 'mmc', 'tar']);
 const SW_REL_TYPES = new Set(['xloader', 'secondary', 'kernel', 'initfs', 'rootfs']);
 const MIN_BATTERY = 10;
@@ -217,8 +223,10 @@ export class Flasher {
     this.log(`Image SW version ${fiasco.swVersion || '<none>'}`);
     // Resolve which sub-image goes to which slot.
     const plan = [];
-    for (const type of SU_FLASH_ORDER) {
+    for (const type of SU_SEQUENCE) {
       if (!chosen.some((i) => i.type === type)) continue;
+      // The original drops tar whenever a rootfs is flashed.
+      if (type === 'tar' && plan.some((i) => i.type === 'rootfs')) { this.log('Image tar skipped'); continue; }
       const img = pickFrom(type, product, hwBuild);
       if (!img) { this.log(`Image ${type} not present for this HW (${product} rev. ${hwBuild})`); continue; }
       if (su.info.supported.length && !su.info.supported.includes(type)) this.log(`WARNING: server does not list '${type}' as supported`);
