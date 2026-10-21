@@ -89,7 +89,7 @@ Supported browsers: Chromium-based (Chrome, Chromium, Edge, Brave, Opera). Firef
 | Zero-length packets | sent after 512-byte multiples | done explicitly in `SuClient`; the browser does not add them for you. |
 | Re-enumeration | rescans bus | needs a fresh permission when the new device has no serial number (see step 5 above). |
 | Serial / `-S` cold flash | deprecated in the original too | not supported. USB only. |
-| CAL backup (`SU_READ_CONFIG`), certificates, `--erase-*` options not listed in the UI | partially hidden CLI options | the protocol client has `readConfig` and erase; CAL backup and certificate commands have no UI. |
+| CAL backup (`SU_READ_CONFIG`), certificates, erase without flashing | partially hidden CLI options; `--erase-*` without `-f` | the protocol client has `readConfig` and a standalone `erase`; CAL backup, certificate commands and erase-only have no UI (erase is offered only as part of a flash). |
 | Parallel image programming | flashes MMC and NAND images concurrently | images are flashed one at a time (slower, possibly rejected by some server versions). |
 | Large files | streamed from disk | the FIASCO is read fully into memory, so a multi-GiB eMMC image needs matching RAM. |
 | Cold flash with several `2nd` images | boots the matching `1st` image, queries the HWID, then picks the `2nd`/`ape-algo` for that HW | not supported: refused with the original's "supply 1st image OR specify hardware type" error. A FIASCO with a single `2nd` works. |

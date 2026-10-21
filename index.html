@@ -109,14 +109,12 @@
         <label>MMC method
           <select id="erase-method"><option value="secure">secure</option><option value="quick">quick</option></select>
         </label>
-        <button id="btn-erase-mmc" disabled>Erase MMC now</button>
-        <button id="btn-erase-user" disabled>Erase user data now (secure)</button>
       </div>
       <div class="opts">
         <label><input type="checkbox" id="opt-erase-mmc"> also erase MMC before flashing (<code>--erase-mmc</code>)</label>
         <label><input type="checkbox" id="opt-erase-user"> also erase user data before flashing (<code>--erase-user-data=secure</code>)</label>
       </div>
-      <p class="muted small"><b>MMC</b> erases the eMMC. <b>User data</b> erases the eMMC <i>and swap</i> and resets the device lock, so ticking both erases the MMC twice. Erasing needs the APE algorithm running; a loaded firmware with <code>ape-algo</code> is used to start it.</p>
+      <p class="muted small">Erasing runs before the images are flashed. <b>MMC</b> erases the eMMC. <b>User data</b> erases the eMMC <i>and swap</i> and resets the device lock, so ticking both erases the MMC twice.</p>
     </details>
   </section>
 

@@ -82,7 +82,7 @@ let files = [];
 const extras = new Map(); // type -> plain image supplied by the user
 let busy = false;
 
-const deviceButtons = ['btn-identify', 'btn-flashmode', 'btn-disconnect', 'btn-reboot', 'btn-boot', 'btn-loadboot', 'btn-rd-query', 'btn-rd-on', 'btn-rd-off', 'btn-rd-set', 'btn-rd-clear', 'btn-erase-mmc', 'btn-erase-user'];
+const deviceButtons = ['btn-identify', 'btn-flashmode', 'btn-disconnect', 'btn-reboot', 'btn-boot', 'btn-loadboot', 'btn-rd-query', 'btn-rd-on', 'btn-rd-off', 'btn-rd-set', 'btn-rd-clear'];
 
 function refresh() {
   const connected = !!flasher.session;
@@ -432,8 +432,6 @@ $('btn-rd-on').onclick = () => run('Enabling R&D mode', () => flasher.setRdMode(
 $('btn-rd-off').onclick = () => run('Disabling R&D mode', () => flasher.setRdMode(false, fiasco));
 $('btn-rd-set').onclick = () => run('Setting R&D flags', () => flasher.setRdFlags($('rd-flags').value.trim(), 'set', fiasco), { confirmText: WARRANTY });
 $('btn-rd-clear').onclick = () => run('Clearing R&D flags', () => flasher.setRdFlags($('rd-flags').value.trim(), 'clear', fiasco));
-$('btn-erase-mmc').onclick = () => run('Erasing MMC', () => flasher.erase('mmc', fiasco, $('erase-method').value), { confirmText: `This erases the whole eMMC (${$('erase-method').value}). ` + WARRANTY });
-$('btn-erase-user').onclick = () => run('Erasing user data', () => flasher.erase('userdata', fiasco), { confirmText: 'This erases all user data and resets the device lock. ' + WARRANTY });
 
 renderPlainFiles();
 refresh();
