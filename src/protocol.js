@@ -476,11 +476,14 @@ export class NoloClient {
     const flash = image.type === 'rootfs';
     this.log(`Sending${flash ? ' and flashing' : ''} ${image.type} image (${image.size >> 10} kB)...`);
     await this.#out(flash ? NOLO.SEND_FLASH_IMAGE : NOLO.SEND_IMAGE, 0, 0, image.blob);
-    const chunk = Math.min(0x20000, image.size) || 1;
-    const total = image.size;
+    // Like the original, send the payload rounded up to 128 bytes, 0xFF-filled.
+    const total = image.paddedSize ?? image.size;
+    const chunk = Math.min(0x20000, total) || 1;
     for (let o = 0; o < total; o += chunk) {
-      await this.t.bulkOut(NOLO.DATA_EP, image.data.subarray(o, Math.min(o + chunk, total)));
-      onProgress(Math.min(o + chunk, total), total);
+      const piece = new Uint8Array(Math.min(chunk, total - o)).fill(0xff);
+      if (o < image.size) piece.set(image.data.subarray(o, Math.min(o + piece.length, image.size)));
+      await this.t.bulkOut(NOLO.DATA_EP, piece);
+      onProgress(o + piece.length, total);
     }
     if (flash) {
       this.log('Finishing flashing... ');

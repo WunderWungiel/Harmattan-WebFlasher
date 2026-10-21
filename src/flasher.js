@@ -156,7 +156,10 @@ export class Flasher {
       if (!second) throw new ProtocolError('You have to supply the 2nd image');
       if (!ape) throw new ProtocolError('You have to supply the ape-algo image');
       this.log('Cold flashing...');
-      await this.#cold().run({ second: second.data, apeAlgo: ape.data });
+      await this.#cold().run({
+        second: readPadded(second, 0, second.paddedSize),
+        apeAlgo: readPadded(ape, 0, ape.paddedSize),
+      });
       await this.#reenumerate(['phonet'], 'cold flash');
     } else if (s.mode === 'nolo') {
       const nolo = this.#nolo();

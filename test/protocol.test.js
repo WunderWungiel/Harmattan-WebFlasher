@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   xloaderMessage, xloaderCrc32, isiBuild, isiParse, parseConfigDescriptor, findPhonetInterface,
-  SuClient, NoloClient, ColdFlash, classifyUsbId, parseRdFlags, rdFlagNames, imageHash, SuError, hex,
+  SuClient, NoloClient, ColdFlash, classifyUsbId, parseRdFlags, rdFlagNames, imageHash, SuError, hex, concat,
 } from '../src/protocol.js';
 import { buildFiasco, parseFiasco, pickImage, mergeFiascos, verifyImageHash } from '../src/fiasco.js';
 import { Flasher } from '../src/flasher.js';
@@ -190,7 +190,9 @@ test('NOLO identify and ape-algo boot path ends in SU flash', async () => {
   await fl.flash(fi, new Set([1]), { reboot: false });
   assert.equal(nolo.sent.length, 1);
   assert.equal(nolo.sent[0].req, 0x42);
-  assert.deepEqual(nolo.bulk[0].data, fi.images[0].data.subarray(0, 2000));
+  assert.equal(nolo.bulk[0].data.length, 2048);
+  assert.deepEqual(nolo.bulk[0].data.subarray(0, 2000), fi.images[0].data.subarray(0, 2000));
+  assert.ok(nolo.bulk[0].data.subarray(2000).every((b) => b === 0xff));
   assert.equal(nolo.bulk[0].ep, 2);
   assert.deepEqual(nolo.booted, { mode: 0, cmdline: ' ' });
   assert.deepEqual(srv.images.map((i) => i.type), ['kernel']);
@@ -220,6 +222,25 @@ test('cold flash sequence', async () => {
   assert.deepEqual([...rom.out[0]], [2, 0, 3, 0xf0]);
   assert.deepEqual(rom.msgs.map((m) => m.cmd.toString(16)), ['6301', '6304']);
   assert.equal(rom.msgs[1].size, 70000);
+});
+
+test('cold flash from a FIASCO sends 0xFF-padded 2nd and ape-algo', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: [
+      { type: '2nd', data: rnd(1000, 1) },
+      { type: 'ape-algo', data: rnd(3000, 2) },
+      { type: 'kernel', data: rnd(500, 3) },
+    ],
+  })) }]);
+  const rom = new FakeBootRom();
+  const srv = new FakeSuServer();
+  const host = new FakeHost([{ mode: 'bootrom', transport: rom.transport(), usb: { vid: 0x451, pid: 0xd00e } }, sessionFor(srv)]);
+  await new Flasher(host).flash(fi, new Set([2]), { reboot: false });
+  assert.equal(new DataView(rom.out[1].buffer).getUint32(0, true), 1024);
+  const second = concat(...rom.out.slice(2, rom.out.findIndex((b, i) => i > 1 && b.length === 16)));
+  assert.equal(second.length, 1024);
+  assert.ok(second.subarray(1000).every((b) => b === 0xff));
+  assert.equal(rom.msgs[1].size, 3072);
 });
 
 test('reboot over SU sends the 16-byte state-change string', async () => {
