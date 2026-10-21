@@ -276,7 +276,13 @@ export class Flasher {
       throw e;
     });
     if (su.version >= 100) await su.setParam('/update/cmt/verify', '1');
-    if (su.version >= 104) await su.setParam('/update/mmc/no_preserve', options.noPreserve ? '1' : '0');
+    // Like the original, a failure here is reported but does not stop the update.
+    if (su.version >= 104) {
+      try { await su.setParam('/update/mmc/no_preserve', options.noPreserve ? '1' : '0'); } catch (e) {
+        if (e.code === 'disconnected') throw e;
+        this.log('Unable to set MMC no preserve');
+      }
+    }
 
     // Like the original's scheduler: a failed image skips the later images of
     // its group, the other groups carry on, and the update fails at the end.

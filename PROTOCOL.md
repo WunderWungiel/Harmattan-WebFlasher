@@ -272,7 +272,7 @@ Protocol-version feature gates: `≥101` cancel update (0x65), `≥102` error li
 | `/update/no_battery_level_check` | set `1` | only with the `-O` option at `flasher_opts+0x18`; sent before flashing (`FUN_0041155c`) and before BEGIN_ERASE |
 | `/update/cmt/verify` | set `1` | proto ≥ 100 unless `-O` skips |
 | `/update/cmt/perform_rfs` | set `1` | only when the option at `flasher_opts+4` is set; not sent by default |
-| `/update/mmc/no_preserve` | set `0`/`1` | proto ≥ 104 |
+| `/update/mmc/no_preserve` | set `0`/`1` | proto ≥ 104; a failure only prints "Unable to set MMC no preserve" and the update goes on (`0x4117cb` ignores the result of `FUN_004139f4`) |
 | `/update/nand/part_table/version` | get | copied to ↓ |
 | `/device/nand/part_table/version` | set | repartition |
 | `/device/product_code`, `/device/hw_build` | get | |

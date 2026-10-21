@@ -462,3 +462,13 @@ test('a failed xloader stops everything after it; a failed cert-sw stops at once
   assert.deepEqual(c.images.map((i) => i.type), ['cert-sw']);
   assert.ok(c.finished);
 });
+
+test('a failed /update/mmc/no_preserve is reported but the update goes on', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({ images: [{ type: 'kernel', data: rnd(512, 3) }] })) }]);
+  const srv = new FakeSuServer({ rejectSet: ['/update/mmc/no_preserve'] });
+  const logs = [];
+  await new Flasher(new FakeHost([sessionFor(srv)]), { log: (m) => logs.push(m) }).flash(fi, new Set([0]), { reboot: false });
+  assert.ok(logs.includes('Unable to set MMC no preserve'));
+  assert.deepEqual(srv.images.map((i) => i.type), ['kernel']);
+  assert.ok(srv.finished);
+});

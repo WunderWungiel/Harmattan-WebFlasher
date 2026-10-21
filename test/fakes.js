@@ -8,7 +8,7 @@ const be64 = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBig
 
 /** An SU (softupd) server speaking ISI over a fake bulk pipe. */
 export class FakeSuServer {
-  constructor({ protocol = 108, appInfo = '1.4.8', product = 'RM-696', hwBuild = '2101', battery = 80, failImage = null, rdMode = '' } = {}) {
+  constructor({ protocol = 108, appInfo = '1.4.8', product = 'RM-696', hwBuild = '2101', battery = 80, failImage = null, rdMode = '', rejectSet = [] } = {}) {
     this.params = new Map([
       ['/update/protocol_version', String(protocol)],
       ['/update/application_info', appInfo],
@@ -26,6 +26,7 @@ export class FakeSuServer {
     this.images = []; // {blob, received[]}
     this.raw = [];
     this.failImage = failImage;
+    this.rejectSet = rejectSet; // SET_PARAMETER keys answered with an error
     this.finished = false;
     this.rebooted = null;
     this.blockSize = 4096;
@@ -60,6 +61,7 @@ export class FakeSuServer {
       }
       case SU.SET_PARAMETER: {
         const z = p.indexOf(0);
+        if (this.rejectSet.includes(cstr(p))) return this.#reply(req, 0x22, Uint8Array.of(6));
         this.params.set(new TextDecoder().decode(p.subarray(0, z)), new TextDecoder().decode(p.subarray(z + 1)));
         return ok();
       }
