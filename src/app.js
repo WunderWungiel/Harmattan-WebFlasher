@@ -286,6 +286,9 @@ async function addPlain(type, file) {
 
 const LOADER_TYPES = new Set(['2nd', '1st', 'ape-algo', 'initfs', 'initrd']);
 const flashable = (img) => SU_FLASH_ORDER.includes(img.type);
+// The original's default flash mask is 0x3ff, which leaves out config
+// (0x2000); no CLI option selects it, so only tick it on request.
+const flashByDefault = (img) => flashable(img) && img.type !== 'config';
 
 function renderImages() {
   const tbl = $('images');
@@ -299,7 +302,8 @@ function renderImages() {
     if (!flashable(img)) tr.className = 'loader';
     const td = (text, cls) => { const c = document.createElement('td'); c.textContent = text; if (cls) c.className = cls; tr.append(c); return c; };
     const cb = document.createElement('input');
-    cb.type = 'checkbox'; cb.dataset.index = img.index; cb.checked = flashable(img); cb.disabled = !flashable(img);
+    cb.type = 'checkbox'; cb.dataset.index = img.index; cb.checked = flashByDefault(img); cb.disabled = !flashable(img);
+    if (img.type === 'config') cb.title = 'Not flashed by the original flasher; tick only if you know you need it';
     cb.addEventListener('change', refresh);
     cb.setAttribute('aria-label', `flash ${img.type}`);
     td('').append(cb);

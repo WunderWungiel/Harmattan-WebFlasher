@@ -33,6 +33,8 @@ Build facts: ELF64, dynamically linked against `libusb-0.1` and `librt`, strippe
 
 Image names recognised (table at `0x61fc80`) **[bin]**: `cert-sw`(0x4000) `cmt-2nd`(0x10) `cmt-algo`(0x20) `cmt-mcusw`(0x40) `xloader`/`secondary`(0x1) `kernel`(0x2) `moslo`(0x80) `rootfs`(0x8) `mmc`(0x100) `tar`(0x200) `config`(0x2000). Also handled in the FIASCO/NOLO paths: `1st`, `2nd`, `ape-algo`(0x1000), `initfs`(4), `initrd`.
 
+The flash mask starts at `0x3ff` (`0x402bce`): every main image and the CMT images, but not `config` (0x2000), which no option can select. `cert-sw` is added later (5.6).
+
 ---
 
 ## 1. Operating flow (what `main` does) **[bin]**
