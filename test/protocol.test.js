@@ -189,7 +189,10 @@ test('flash aborts on low battery and on server-reported failure', async () => {
   const bad = new FakeSuServer({ failImage: 'kernel' });
   const fl = new Flasher(new FakeHost([sessionFor(bad)]));
   await assert.rejects(fl.flash(fi, new Set([0])), /Update failed/);
-  assert.ok(bad.cancelled);
+  assert.ok(!bad.cancelled);
+  assert.ok(bad.finished);
+  assert.ok(bad.seen.indexOf(0x01, bad.seen.lastIndexOf(0x06)) >= 0); // error list fetched before FINISH_UPDATE
+  assert.equal(bad.seen.at(-1), 0x1f);
 });
 
 test('NOLO identify and ape-algo boot path ends in SU flash', async () => {

@@ -203,13 +203,16 @@ export class Flasher {
     } catch (e) {
       this.log(e instanceof Cancelled ? 'Cancelling update...' : `ERROR: ${e.message}`);
       if (e.detail) this.log(`=== Detailed error info=========\n${e.detail}\n================================`);
-      if (su.version >= 101) {
-        await su.cancel();
+      // Like the original: CANCEL_UPDATE only when the user aborts, then the
+      // error list, then FINISH_UPDATE to close an update that was begun.
+      if (e instanceof Cancelled && su.version >= 101) await su.cancel();
+      if (su.version > 101) {
         try {
           const list = await su.getParam('/update/error_list');
           if (list) this.log(`Fetching error list:\n========================================\n${list}\n========================================`);
         } catch { /* ignore */ }
       }
+      if (su.updateActive) { try { await su.finishUpdate(); } catch { /* ignore */ } }
       throw e;
     }
     this.log(`Done in ${((Date.now() - t0) / 1000).toFixed(1)} s`);

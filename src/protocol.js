@@ -565,6 +565,7 @@ export class SuClient {
     this.version = 0;
     this.info = {};
     this.cancelled = false;
+    this.updateActive = false; // between BEGIN_UPDATE and FINISH_UPDATE
   }
 
   async #write(frame) {
@@ -674,8 +675,8 @@ export class SuClient {
 
   async batteryLevel() { return parseInt(await this.getParam('/device/battery_level'), 10); }
 
-  async beginUpdate() { await this.request(SU.BEGIN_UPDATE); }
-  async finishUpdate() { await this.request(SU.FINISH_UPDATE); }
+  async beginUpdate() { await this.request(SU.BEGIN_UPDATE); this.updateActive = true; }
+  async finishUpdate() { this.updateActive = false; await this.request(SU.FINISH_UPDATE); }
 
   async beginImage(blob) {
     const p = await this.request(SU.BEGIN_IMAGE_UPDATE, blob, { min: 9, statusIdx: 8 });
