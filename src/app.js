@@ -88,6 +88,7 @@ function refresh() {
   const connected = !!flasher.session;
   for (const id of deviceButtons) $(id).disabled = busy || !connected;
   $('btn-boot').disabled = busy || flasher.session?.mode !== 'nolo';
+  $('btn-reboot').disabled = busy || !connected || flasher.session.mode === 'bootrom';
   $('btn-connect').disabled = busy;
   $('btn-wait').disabled = busy || connected;
   $('btn-flashmode').disabled = busy || !connected || flasher.session.mode === 'nolo' || flasher.session.mode === 'bootrom';

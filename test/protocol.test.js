@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   xloaderMessage, xloaderCrc32, isiBuild, isiParse, parseConfigDescriptor, findPhonetInterface,
-  SuClient, NoloClient, ColdFlash, classifyUsbId, parseRdFlags, rdFlagNames, imageHash, SuError, hex, concat,
+  SuClient, NoloClient, ColdFlash, classifyUsbId, parseRdFlags, rdFlagNames, imageHash, SuError, hex, concat, TransportError,
 } from '../src/protocol.js';
 import { buildFiasco, parseFiasco, pickImage, mergeFiascos, verifyImageHash } from '../src/fiasco.js';
 import { Flasher } from '../src/flasher.js';
@@ -391,4 +391,74 @@ test('erase honours the method and runs before BEGIN_UPDATE', async () => {
   await new Flasher(new FakeHost([sessionFor(srv)])).flash(fi, new Set([0]), { eraseMmc: 'quick', eraseUserData: true, reboot: false });
   assert.deepEqual(srv.erased, ['mmc=quick', 'userdata=secure']);
   assert.ok(srv.seen.indexOf(0x12) < srv.seen.indexOf(0x03));
+});
+
+test('Identify in cold-flash mode keeps the ASIC ID for the following cold flash', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: [{ type: '2nd', data: rnd(500, 1) }, { type: 'ape-algo', data: rnd(500, 2) }, { type: 'kernel', data: rnd(500, 3) }],
+  })) }]);
+  const rom = new FakeBootRom(); // sends its ASIC ID only once
+  const srv = new FakeSuServer();
+  const fl = new Flasher(new FakeHost([{ mode: 'bootrom', transport: rom.transport(), usb: { vid: 0x451, pid: 0xd00e } }, sessionFor(srv)]));
+  assert.equal((await fl.identify()).asic.chip, 'OMAP3630');
+  await fl.flash(fi, new Set([2]), { reboot: false });
+  assert.deepEqual([...rom.out[0]], [2, 0, 3, 0xf0]);
+  assert.deepEqual(srv.images.map((i) => i.type), ['kernel']);
+});
+
+test('Reboot is refused in cold-flash mode and sends nothing', async () => {
+  const rom = new FakeBootRom();
+  const fl = new Flasher(new FakeHost([{ mode: 'bootrom', transport: rom.transport(), usb: { vid: 0x451, pid: 0xd00e } }]));
+  await assert.rejects(fl.reboot(), /not available in cold-flash mode/);
+  assert.equal(rom.out.length, 0);
+});
+
+test('R&D flag set/clear needs a flag list and refuses master', async () => {
+  const nolo = new FakeNolo();
+  nolo.rd.flags = 0x13;
+  const fl = () => new Flasher(new FakeHost([{ mode: 'nolo', transport: nolo.transport(), usb: { vid: 0x421, pid: 0x105 } }]));
+  await assert.rejects(fl().setRdFlags('', 'clear'), /Possible R&D flags/);
+  await assert.rejects(fl().setRdFlags('master', 'clear'), /Possible R&D flags/);
+  await assert.rejects(fl().setRdFlags('serial-console,master', 'set'), /Possible R&D flags/);
+  assert.equal(nolo.rd.flags, 0x13);
+  await fl().setRdFlags('serial-console', 'clear');
+  assert.equal(nolo.rd.flags, 0x03); // R&D mode (bit 0) untouched
+});
+
+test('NOLO init refuses a missing HW revision or bootloader version, like the original', async () => {
+  await assert.rejects(new NoloClient(new FakeNolo({ hwRev: '' }).transport()).init(), /HW revision not found/);
+  const nolo = new FakeNolo();
+  const t = nolo.transport();
+  const noVersion = { ...t, controlIn: async (req, ...rest) => { if (req === 0x03) throw new TransportError('stall', 'stall'); return t.controlIn(req, ...rest); } };
+  await assert.rejects(new NoloClient(noVersion).init(), /Unable to get bootloader version/);
+  const short = { ...t, controlIn: async (req, ...rest) => (req === 0x03 ? Uint8Array.of(1, 2) : t.controlIn(req, ...rest)) };
+  await assert.rejects(new NoloClient(short).init(), /2 version bytes/);
+});
+
+test('a failed image skips its group; other groups are still flashed, then the update fails', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    swVersion: 'RM-696_TEST',
+    images: ['kernel', 'moslo', 'mmc'].map((type, i) => ({ type, data: rnd(512, i + 1) })),
+  })) }]);
+  const srv = new FakeSuServer({ failImage: 'kernel' });
+  const logs = [];
+  await assert.rejects(new Flasher(new FakeHost([sessionFor(srv)]), { log: (m) => logs.push(m) })
+    .flash(fi, new Set([0, 1, 2]), { reboot: false }), /Update failed: kernel, moslo not flashed/);
+  assert.deepEqual(srv.images.map((i) => i.type), ['kernel', 'mmc']); // moslo (group 0) skipped, mmc (group 2) flashed
+  assert.ok(logs.some((l) => /Image moslo skipped/.test(l)));
+  assert.equal(srv.swRel, undefined);
+  assert.ok(srv.finished);
+});
+
+test('a failed xloader stops everything after it; a failed cert-sw stops at once', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: ['cert-sw', 'xloader', 'cmt-2nd', 'mmc'].map((type, i) => ({ type, data: rnd(512, i + 1) })),
+  })) }]);
+  const x = new FakeSuServer({ failImage: 'xloader' });
+  await assert.rejects(new Flasher(new FakeHost([sessionFor(x)])).flash(fi, new Set([0, 1, 2, 3]), { reboot: false }), /xloader, cmt-2nd, mmc not flashed/);
+  assert.deepEqual(x.images.map((i) => i.type), ['cert-sw', 'xloader']);
+  const c = new FakeSuServer({ failImage: 'cert-sw' });
+  await assert.rejects(new Flasher(new FakeHost([sessionFor(c)])).flash(fi, new Set([0, 1, 2, 3]), { reboot: false }), /cert-sw could not be flashed/);
+  assert.deepEqual(c.images.map((i) => i.type), ['cert-sw']);
+  assert.ok(c.finished);
 });

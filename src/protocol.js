@@ -192,7 +192,6 @@ export const XLOADER = {
   OK: 0x6faa,
 };
 export const OMAP_PERIPHERAL_BOOT = Uint8Array.of(0x02, 0x00, 0x03, 0xf0);
-export const OMAP_MEMORY_BOOT = Uint8Array.of(0, 0, 0, 0);
 
 export function xloaderMessage(cmd, payload = null) {
   const m = new Uint8Array(16);
@@ -293,9 +292,14 @@ export class ColdFlash {
     return b;
   }
 
-  /** Full cold-flash sequence used with `flasher -c` (2nd + ape-algo). */
-  async run({ second, apeAlgo }) {
-    const asic = await this.readAsicId();
+  /**
+   * Full cold-flash sequence used with `flasher -c` (2nd + ape-algo).
+   * The boot ROM sends its ASIC ID only once, so pass `asic` when it was
+   * already read (e.g. by Identify).
+   */
+  async run({ second, apeAlgo, asic = null }) {
+    if (asic) this.log('Using the ASIC ID read earlier.');
+    else asic = await this.readAsicId();
     this.log(`ASIC: ${asic.chip} rev ${asic.revision}, ${asic.secure}`);
     await this.sendSecondStage(second);
     await this.ping();
@@ -308,12 +312,6 @@ export class ColdFlash {
       }
     }
     throw last;
-  }
-
-  async leave() {
-    this.log('Sending OMAP memory boot message...');
-    await this.t.bulkOut(this.outEp, OMAP_MEMORY_BOOT);
-    await sleep(250);
   }
 }
 
@@ -424,6 +422,7 @@ export class NoloClient {
 
   async version() {
     const b = await this.#in(NOLO.GET_VERSION, 0, 0, 4);
+    if (b.length !== 4) throw new ProtocolError(`Device returned ${b.length} version bytes (we want 4)`);
     const v = view(b).getUint32(0, true);
     return { text: `${(v >>> 20) & 15}.${(v >>> 16) & 15}.${(v >>> 8) & 255}`, patch: (v >>> 8) & 0xffff, api: v & 255 };
   }
@@ -444,17 +443,18 @@ export class NoloClient {
     await this.status();
     const rec = await this.identifyRecords();
     if (!rec.prod_code) throw new ProtocolError('Product code not found');
-    this.log(`Found device ${rec.prod_code}, hardware revision ${rec.hw_rev ?? '?'}`);
-    const info = { product: rec.prod_code, hwRev: rec.hw_rev ?? '', records: rec };
-    try {
-      const v = await this.version();
-      this.log(`NOLO version ${v.text}`);
-      if (v.api >= 2) throw new ProtocolError(`Invalid flashing API version (${v.api}). Try with a newer version of flasher program`);
-      info.nolo = v;
-    } catch (e) {
+    if (!rec.hw_rev) throw new ProtocolError('HW revision not found');
+    this.log(`Found device ${rec.prod_code}, hardware revision ${rec.hw_rev}`);
+    const info = { product: rec.prod_code, hwRev: rec.hw_rev, records: rec };
+    // Like the original, a bootloader that can't report its version is refused.
+    let v;
+    try { v = await this.version(); } catch (e) {
       if (e instanceof ProtocolError) throw e;
-      this.log('Unable to get bootloader version');
+      throw new ProtocolError(`Unable to get bootloader version (${e.message}). Bootloader might be too old`, { code: e.code });
     }
+    this.log(`NOLO version ${v.text}`);
+    if (v.api >= 2) throw new ProtocolError(`Invalid flashing API version (${v.api}). Try with a newer version of flasher program`);
+    info.nolo = v;
     try { info.swRelease = await this.getString('version:sw-release'); } catch { /* optional */ }
     return info;
   }

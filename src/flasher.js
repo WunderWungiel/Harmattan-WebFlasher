@@ -26,6 +26,15 @@ const MAIN_TYPES = new Set(['xloader', 'secondary', 'kernel', 'initfs', 'rootfs'
 const SW_REL_TYPES = new Set(['xloader', 'secondary', 'kernel', 'initfs', 'rootfs']);
 const MIN_BATTERY = 10;
 
+/** Scheduler group of an image in the original's table: a failure skips the rest of its group. */
+const suGroup = (img) => {
+  if (img.type === 'cert-sw') return 3;
+  if (img.type.startsWith('cmt-')) return 1;
+  if (img.type === 'mmc' || img.type === 'tar') return 2;
+  if (img.type === 'rootfs') return img.emmc ? 2 : 0; // OneNAND rootfs goes to group 0
+  return 0;
+};
+
 export class Cancelled extends Error {}
 
 export class Flasher {
@@ -111,7 +120,8 @@ export class Flasher {
     const s = this.session ?? await this.connect();
     const info = { mode: s.mode, usb: s.usb };
     if (s.mode === 'bootrom') {
-      const asic = await this.#cold().readAsicId();
+      // The boot ROM sends the ASIC ID once; keep it for a later cold flash.
+      const asic = s.asic ?? (s.asic = await this.#cold().readAsicId());
       this.log(`ASIC: ${asic.chip} revision ${asic.revision}, ${asic.secure}`);
       this.log(`Root key hash: ${asic.rootKeyHash}`);
       Object.assign(info, { asic, note: 'Cold-flash mode only exposes the ASIC ID. Boot a 2nd-stage image for more.' });
@@ -171,6 +181,7 @@ export class Flasher {
       await this.#cold().run({
         second: readPadded(second, 0, second.paddedSize),
         apeAlgo: readPadded(ape, 0, ape.paddedSize),
+        asic: s.asic,
       });
       await this.#reenumerate(['phonet'], 'cold flash');
     } else if (s.mode === 'nolo') {
@@ -267,10 +278,28 @@ export class Flasher {
     if (su.version >= 100) await su.setParam('/update/cmt/verify', '1');
     if (su.version >= 104) await su.setParam('/update/mmc/no_preserve', options.noPreserve ? '1' : '0');
 
+    // Like the original's scheduler: a failed image skips the later images of
+    // its group, the other groups carry on, and the update fails at the end.
+    // A failed cert-sw stops at once. Nothing else may start before
+    // xloader/secondary are done (the original would wait for a failed one
+    // forever), so their failure skips everything after them.
+    const notFlashed = [];
+    const failedGroups = new Set();
+    let skipRest = false;
     for (const img of plan) {
       this.#check();
-      await this.#flashImage(su, img);
+      if (skipRest || failedGroups.has(suGroup(img))) {
+        this.log(`Image ${img.type} skipped: an earlier image failed`);
+        notFlashed.push(img.type);
+        continue;
+      }
+      if (await this.#flashImage(su, img)) continue;
+      if (img.type === 'cert-sw') throw new SuError('Update failed: cert-sw could not be flashed');
+      notFlashed.push(img.type);
+      failedGroups.add(suGroup(img));
+      if (img.type === 'xloader' || img.type === 'secondary') skipRest = true;
     }
+    if (notFlashed.length) throw new SuError(`Update failed: ${notFlashed.join(', ')} not flashed`);
     if (plan.some((i) => SW_REL_TYPES.has(i.type)) && fiasco.swBlob?.length) {
       this.log('Updating SW release');
       try { await su.updateSwRelease(fiasco.swBlob); } catch (e) { this.log(`SW release update failed: ${e.message}`); }
@@ -287,14 +316,27 @@ export class Flasher {
     this.log(`Battery level ${level} %, continuing.`);
   }
 
+  /**
+   * Flash one image. Returns false when the image failed while its data was
+   * sent or programmed (the update may go on with other groups); throws when
+   * the whole update has to stop, as the original does for BEGIN_IMAGE_UPDATE
+   * and FINISH_IMAGE_UPDATE failures.
+   */
   async #flashImage(su, img) {
     const label = img.type;
     this.log(`Image ${img.type} (${img.size >> 10} kB)${img.version ? ` version ${img.version}` : ''}`);
     const { pipe, blockSize } = await su.beginImage(img.blob);
     this.log(`Pipe id ${pipe}, block size ${blockSize}`, 2);
     // Like the original: the aux pipe serves eMMC-group images (eMMC rootfs, mmc), never tar.
-    const raw = ((img.type === 'rootfs' && img.emmc) || img.type === 'mmc') && su.rawOut > 0;
-    if (raw) { await su.setupAuxPipe(pipe); this.log('Using raw USB data pipe', 1); }
+    // If it can't be set up, the original silently falls back to FEED_DATA_BLOCK.
+    let raw = ((img.type === 'rootfs' && img.emmc) || img.type === 'mmc') && su.rawOut > 0;
+    if (raw) {
+      try { await su.setupAuxPipe(pipe); this.log('Using raw USB data pipe', 1); } catch (e) {
+        if (e.code === 'disconnected') throw e;
+        this.log(`Raw data pipe unavailable (${e.message}); sending the data in FEED_DATA_BLOCK messages`, 1);
+        raw = false;
+      }
+    }
 
     const total = img.paddedSize;
     const maxChunk = 0x100000 - (0x100000 % blockSize);
@@ -315,33 +357,41 @@ export class Flasher {
       }
     };
 
-    while (sent < total) {
-      this.#check();
-      if (Date.now() - lastPoll >= 250) await poll();
-      const free = await su.waitForBuffer(pipe, 250);
-      if (!free) continue;
-      const n = Math.min(free, maxChunk, total - sent);
-      await su.prepareBlock(pipe, n);
-      const chunk = readPadded(img, sent, n);
-      if (raw) {
-        for (let o = 0; o < n; o += 0x40000) await su.t.bulkOut(su.rawOut, chunk.subarray(o, Math.min(o + 0x40000, n)));
-      } else {
-        for (let o = 0; o < n; o += 0x8000) await su.feed(pipe, chunk.subarray(o, Math.min(o + 0x8000, n)));
+    try {
+      while (sent < total) {
+        this.#check();
+        if (Date.now() - lastPoll >= 250) await poll();
+        const free = await su.waitForBuffer(pipe, 250);
+        if (!free) continue;
+        const n = Math.min(free, maxChunk, total - sent);
+        await su.prepareBlock(pipe, n);
+        const chunk = readPadded(img, sent, n);
+        if (raw) {
+          for (let o = 0; o < n; o += 0x40000) await su.t.bulkOut(su.rawOut, chunk.subarray(o, Math.min(o + 0x40000, n)));
+        } else {
+          for (let o = 0; o < n; o += 0x8000) await su.feed(pipe, chunk.subarray(o, Math.min(o + 0x8000, n)));
+        }
+        sent += n;
+        this.progress({ label, done: sent, total, state: st.stateName, flashed: st.done, flashTotal: st.total });
       }
-      sent += n;
-      this.progress({ label, done: sent, total, state: st.stateName, flashed: st.done, flashTotal: st.total });
-    }
 
-    // wait for the server to finish programming
-    for (;;) {
-      this.#check();
-      await poll();
-      if (st.state === 0x10) break;
-      await sleep(250);
+      // wait for the server to finish programming
+      for (;;) {
+        this.#check();
+        await poll();
+        if (st.state === 0x10) break;
+        await sleep(250);
+      }
+    } catch (e) {
+      if (e instanceof Cancelled || e.code === 'disconnected') throw e;
+      this.log(`Image ${img.type} failed: ${e.message}`);
+      this.progress({ label, done: sent, total, state: 'failed' });
+      return false;
     }
     await su.finishImage(pipe);
     this.progress({ label, done: total, total, state: 'finished' });
     this.log(`[finished  100 %] ${label.padEnd(10)} ${total >> 10} kB`);
+    return true;
   }
 
   async #rebootSu(su) {
@@ -354,9 +404,10 @@ export class Flasher {
   /** `flasher -R` */
   async reboot() {
     const s = this.session ?? await this.connect();
-    if (s.mode === 'nolo') { await this.#nolo().reboot(); }
-    else if (s.mode === 'phonet') { await this.#rebootSu(await this.#suReady()); }
-    else await this.#cold().leave();
+    // The original never talks to the boot ROM except to cold flash.
+    if (s.mode === 'bootrom') throw new ProtocolError('Reboot is not available in cold-flash mode. Unplug the phone to leave it.');
+    if (s.mode === 'nolo') await this.#nolo().reboot();
+    else await this.#rebootSu(await this.#suReady());
     this.log('Success');
   }
 
@@ -396,17 +447,19 @@ export class Flasher {
 
   /** flagList: "no-lifeguard-reset,serial-console"; mode 'set' (add) | 'clear' (remove) */
   async setRdFlags(flagList, mode = 'set', fiasco = null) {
-    const mask = flagList ? parseRdFlags(flagList) & ~RD_FLAGS.master : 0;
+    // Like the original's --set-rd-flags / --clear-rd-flags: a flag list is
+    // required and "master" (the R&D mode itself) is not accepted.
+    const mask = parseRdFlags(flagList ?? '');
+    if (!mask || mask & RD_FLAGS.master) {
+      throw new ProtocolError(`Give one or more R&D flags. Possible R&D flags: ${Object.keys(RD_FLAGS).filter((k) => k !== 'master').join(', ')}`);
+    }
     const { nolo, su } = await this.#rdTarget(fiasco, 'flags');
     if (nolo) {
-      if (mode === 'set') await nolo.setRdFlags({ add: mask });
-      else await nolo.setRdFlags({ del: flagList ? mask : 0xffff });
+      await nolo.setRdFlags(mode === 'set' ? { add: mask } : { del: mask });
       return;
     }
-    const names = Object.entries(RD_FLAGS).filter(([k, v]) => k !== 'master' && mask & v).map(([k]) => k);
-    if (!flagList && mode === 'clear') await su.setRdMode({ removeAll: true });
-    else if (mode === 'set') await su.setRdMode({ add: names });
-    else await su.setRdMode({ remove: names });
+    const names = rdFlagNames(mask);
+    await su.setRdMode(mode === 'set' ? { add: names } : { remove: names });
   }
 
   async queryRdMode() {

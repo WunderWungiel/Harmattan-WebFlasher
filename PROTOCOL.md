@@ -23,7 +23,7 @@ Build facts: ELF64, dynamically linked against `libusb-0.1` and `librt`, strippe
 --cmt-2nd --cmt-algo --cmt-mcusw
 -i read-device-id    -f flash    -l load only    -b[cmdline] boot    -R reboot
 -c cold-flash
---enable-rd-mode --disable-rd-mode --set-rd-flags[=F] --clear-rd-flags[=F] --query-rd-mode
+--enable-rd-mode --disable-rd-mode --set-rd-flags=F --clear-rd-flags=F --query-rd-mode
 --flash-only=LIST   -M flash-only-mmc
 -U bus[:addr] | s:<usb serial> | S:<serial>
 --erase-user-data[=secure]   --erase-mmc[=secure]
@@ -103,7 +103,7 @@ Known 0421 PIDs (0xFFFF `usb-device.c`) **[0xFFFF]**: 0x01c8 (N900 / N950 Mk II)
 
 Used with `-c`. Transport: bulk IN `0x81`, bulk OUT `0x01` on interface 0, alt 0.
 
-1. **Read ASIC ID.** `bulk read` on the IN EP (max 0x100, timeout 500 ms). At least 0x45 (69) bytes are required. 0xFFFF expects exactly 69. Layout **[0xFFFF]**:
+1. **Read ASIC ID.** `bulk read` on the IN EP (max 0x100, timeout 500 ms). At least 0x45 (69) and at most 0x80 bytes are accepted. 0xFFFF expects exactly 69. The boot ROM sends the ASIC ID **once** per enumeration, so a client that reads it early (e.g. for an identify step) must keep it for the cold flash instead of reading again. Layout **[0xFFFF]**:
    - `[0]=0x05` subblock count
    - `[1..3]=01 05 01` ID subblock
    - `[4..6]` chip: `34 30 07` = OMAP3430, `36 30 07` = OMAP3630
@@ -139,7 +139,7 @@ Used with `-c`. Transport: bulk IN `0x81`, bulk OUT `0x01` on interface 0, alt 0
    | `0x6305` | HWID query (reply ≤32 bytes, printed as `Received %d bytes from 1st`) |
 
    After the 16-byte header the device replies with a 4-byte word: `0x00006FAA` means OK. A value whose low byte is `0xAA` is an error code (error = `-(word & 0xFFFF)`). Replies are read with 500 ms timeout for the header acknowledgement and 5000 ms after the payload. Payload is sent in chunks of at most `0x10000`; the device acknowledges once more with `0x6FAA`.
-4. **Sequence** (`-c`, `FUN_0040e30b`): read ASIC ID → send 2nd → ping (up to 4 tries) → send ape-algo (`0x6304`, up to 3 tries) → close. The 2nd and ape-algo payloads (and the 2nd length word) use the 128-byte-padded, `0xFF`-filled size (6.2). The separate "1st image" path (`FUN_0040e573`) sends 1st → waits 50 ms → HWID query (up to 4 tries, then drains pending input). Leaving cold flash (`-c` without a follow-up) sends the OMAP *memory boot* message `00 00 00 00` **[0xFFFF]**.
+4. **Sequence** (`-c`, `FUN_0040e30b`): read ASIC ID → send 2nd → wait 50 ms (the transport's pre-ping hook `FUN_0040e94e`, run once) → ping (up to 4 tries) → send ape-algo (`0x6304`, up to 3 tries) → close. The 2nd and ape-algo payloads (and the 2nd length word) use the 128-byte-padded, `0xFF`-filled size (6.2). The separate "1st image" path (`FUN_0040e573`) sends 1st → waits 50 ms → HWID query (up to 4 tries, then drains pending input). The 3.12 binary never sends the OMAP *memory boot* message `00 00 00 00` (that is 0xFFFF only); closing the transport (`FUN_0040e96b`) just releases the device. Outside `-c` the tool does not open boot ROM devices at all (other operations scan only for NOLO/Phonet), so there is no reboot or boot in this mode.
 
 Cold flash requires `2nd` and `ape-algo` images (`You have to supply the 2nd image for %s:%s`, `You have to supply the ape-algo image`). Without device info, the first image of each type in the FIASCO is used (6.3).
 
@@ -153,7 +153,7 @@ Pure vendor control transfers on EP0 plus bulk OUT on EP2 for payloads. Interfac
 
 | bRequest | dir | wValue | wIndex | data | purpose |
 |----------|-----|--------|--------|------|---------|
-| `0x01` GET_STATUS | in | 0 | 0 | 4 bytes | read once (one retry after a stall), exactly 4 bytes required, value not checked (`FUN_0040aceb`, `NOLO_REQ_GET_STATUS`). 0xFFFF polls until 0 |
+| `0x01` GET_STATUS | in | 0 | 0 | 4 bytes | loop of 2 reads that only ends early on a 0-byte reply, so a normal 4-byte reply means it is sent **twice**; a stall counts as one try; the last read must return exactly 4 bytes; the value is not checked (`FUN_0040aceb`, verified in the disassembly at `0x40aceb`). 0xFFFF polls until 0. The web version reads once (plus one retry after a stall); the value is ignored either way |
 | `0x03` GET_NOLO_VERSION | in | 0 | 0 | 4 bytes | `major=v>>20&15, minor=v>>16&15, patch=v>>8&255`; `(v&0xFF) >= 2` = "Invalid flashing API version" |
 | `0x04` IDENTIFY | in | 0 | 0 | ≤512 | device info blocks (below) |
 | `0x05` ERROR_LOG | in | 0 | 0 | ≤0x800 | NUL-separated strings; sent after any failed request (`-ENODEV` style `-0x20` = pipe stall) |
@@ -174,6 +174,8 @@ Pure vendor control transfers on EP0 plus bulk OUT on EP2 for payloads. Interfac
 | `0x83` REBOOT | out | 0 | 0 | – | plain reboot (refused when a boot mode is requested) |
 
 Identify blocks (`FUN_0040d5d8`): repeated `{ char name[14]; u16 len; u8 data[len] }` records. The record header is 16 bytes with the length at offset 14. `len` must be a multiple of 4. The tool reads `prod_code` (e.g. `RM-696`) and `hw_rev` (decimal string). `sw-release` / `kernel` / `initfs` / `nolo` / `content` versions come from `STRING`/`GET_STRING` with key `version:<name>` **[0xFFFF]**.
+
+NOLO init (`FUN_0040b069`) fails, and nothing else is done over NOLO, when: the status read fails, `prod_code` is missing ("Product code not found"), `hw_rev` is missing ("HW revision not found"), GET_NOLO_VERSION fails or does not return exactly 4 bytes ("Unable to get bootloader version" / "Bootloader might be too old"), or the API byte is ≥ 2. Only the `version:sw-release` string is optional.
 
 **R&D setter gate**: the NOLO context is set up with its R&D setter slot (`ctx+0x38`) empty and `FUN_0040d1da` in `ctx+0x40` (the query hook). `FUN_0040b069` then does `ctx[7] = ctx[8]` when the NOLO version (`v >> 8`, i.e. major/minor/patch) is **outside** `0x1509…0x1604` (1.5.9 – 1.6.4). So outside that window NOLO can *set* R&D mode and flags itself (section 5.8); inside it, setting them needs the APE algorithm.
 
@@ -203,6 +205,8 @@ byte 10…  payload
 ```
 
 A response swaps bytes 1/2 and 6/7 and has the same transaction id. The host accepts a reply only when `reply[2]==req[1] && reply[1]==req[2] && reply[6]==req[7] && reply[8]==req[8]`; otherwise `-EINVAL`. **[bin+0xFFFF]**: 0xFFFF's `MKII_OUT = 0x8810001B` and `MKII_IN = 0x8800101B` are exactly the first four bytes of this header (little-endian u32). A bulk OUT whose size is a multiple of 512 is followed by a zero-length packet.
+
+The original does exactly **one** bulk read per request (`FUN_00415b6c`). A reply with the wrong transaction id or addresses fails the request with `-EINVAL`; a read timeout (`-6`) or an empty read is reported as `%s_REQ timed out`. **Web version deviation (deliberate):** a WebUSB read can't be cancelled, so a reply to a request that timed out earlier (e.g. a ping) arrives on a later read. The web client skips replies whose transaction id or addresses don't match and keeps reading until its own timeout.
 
 Response id = request id | `0x20` for every SU message. Special replies:
 - msg id `0xFF` from resource 0x88: "Server in failure mode: internal error or bad HW. Cannot continue".
@@ -245,7 +249,7 @@ Default reply timeout 5000 ms. `FEED_DATA_BLOCK` waits 20000 ms. `WAIT_FOR_BUFFE
 
 1. Template header `{media 0x1b, rdev 0, sdev 0x10, res 0x88, robj 0, sobj 0}`.
 2. If VID:PID is 0421:03D2 or 0421:051A → "Device is in Sync and connect mode, sending ADL reboot" (5.7), re-enumerate.
-3. Ping loop: `VERIFY_COMMS` with timeouts 250, 500, 1000, 2000, 4000, 5000 ms (doubling, capped at 5 s), up to 6 attempts (`Ping attempt %d (%d ms)`). A final failure with status `-4` → "Unknown response, trying ADL reboot".
+3. Ping loop: `VERIFY_COMMS` with timeouts 250, 500, 1000, 2000, 4000, 5000 ms (doubling, capped at 5 s), up to 6 attempts (`Ping attempt %d (%d ms)`). Only a timeout leads to another attempt. The reply payload must echo the request exactly (min = max = request length, then `memcmp`, "data verify error"). Any unexpected reply (status `-4`) ends the loop at once → "Unknown response, trying ADL reboot".
 4. `GET_PARAMETER /update/protocol_version` → decimal string, e.g. `108`. Must satisfy `106 ≤ v ≤ 108`; `< 106` → "deprecated server" error; `> 108` → "You have to update the flasher client".
 5. `SET_PARAMETER /update/host_protocol_version = "108"`.
 6. `GET_PARAMETER /update/application_info` (`FUN_00412d98`), printed as `Server application: %s`, parsed as `%u.%u.%u`. Anything below **1.4.8**, or a failed read, aborts with "Refusing to continue: Image contains a deprecated server" ("may overwrite the certificates and render your device unusable").
@@ -265,7 +269,7 @@ Protocol-version feature gates: `≥101` cancel update (0x65), `≥102` error li
 | `/update/supported_images` | get | comma list matching section 0 |
 | `/update/error_list` | get | dumped after failure when proto ≥ 102 |
 | `/update/trace_level` | set | |
-| `/update/no_battery_level_check` | set `1` | `-O…` |
+| `/update/no_battery_level_check` | set `1` | only with the `-O` option at `flasher_opts+0x18`; sent before flashing (`FUN_0041155c`) and before BEGIN_ERASE |
 | `/update/cmt/verify` | set `1` | proto ≥ 100 unless `-O` skips |
 | `/update/cmt/perform_rfs` | set `1` | only when the option at `flasher_opts+4` is set; not sent by default |
 | `/update/mmc/no_preserve` | set `0`/`1` | proto ≥ 104 |
@@ -273,7 +277,7 @@ Protocol-version feature gates: `≥101` cancel update (0x65), `≥102` error li
 | `/device/nand/part_table/version` | set | repartition |
 | `/device/product_code`, `/device/hw_build` | get | |
 | `/device/hw_build_override` | set | `--hw-revision` style override |
-| `/device/battery_level` | get | decimal %, flashing needs > 10 %. Below that the tool aborts (or waits with `-Owait-charging`) |
+| `/device/battery_level` | get | decimal %. **Not read by default**: the server enforces its own limit, and BEGIN_UPDATE / BEGIN_ERASE then fail with status 11 (`-9`), which prints "BATTERY IS LOW. DEVICE IS NOW CHARGING." and the level. Only with `-Owait-charging` does the host poll it before BEGIN_UPDATE / BEGIN_ERASE, waiting once a second while it is ≤ 10 % ("%d %% required" prints 11). The web version always refuses at ≤ 10 % before flashing or erasing; its "skip battery check" skips only that local check and does not set `/update/no_battery_level_check` |
 | `/device/rd_mode` | get/set | see 5.8 |
 
 ### 5.6 Flashing one sub-image (`FUN_004115b1`, `FUN_00411344`)
@@ -290,7 +294,8 @@ for each sub-image (scheduler FUN_00410d29 decides when each may start, see belo
         PREPARE_DATA_BLOCK(pipe_id, chunk)
         if aux pipe: bulk-write chunk raw to the raw data EP (5000 ms)
         else:        FEED_DATA_BLOCK messages of ≤ 0x8000 bytes each
-        GET_UPDATE_STATUS(pipe_id) periodically  (≥250 ms apart)
+        GET_UPDATE_STATUS(pipe_id) periodically  (≥250 ms apart; the WAIT_FOR_BUFFER timeout is
+                                                  250 ms minus the time since the last status poll)
     FINISH_IMAGE_UPDATE(pipe_id) once state == finished (0x10)
 UPDATE_SW_REL(blob)                      (only when xloader/secondary, kernel, initfs or rootfs was flashed: mask & 0xF)
 FINISH_UPDATE
@@ -298,7 +303,8 @@ FINISH_UPDATE
 
 Notes:
 - The image payload length is padded up to a multiple of 128 bytes (`WARNING: Image '%s' not aligned`); the padding is **`0xFF`** (6.2).
-- The aux ("raw") pipe is used for images in group 2 (eMMC rootfs, `mmc`) when a raw data EP was found, never for `tar`. Raw bulk writes retry up to 10 times on `EAGAIN`; zero-length result = "Raw data transfer timed out".
+- The aux ("raw") pipe is used for images in group 2 (eMMC rootfs, `mmc`) when a raw data EP was found, never for `tar`. Raw bulk writes retry up to 10 times on `EAGAIN`; zero-length result = "Raw data transfer timed out". If SETUP_AUX_DATA_PIPE fails, its result is ignored and the image is sent with FEED_DATA_BLOCK instead.
+- **Per-image failures** (`FUN_00410002`): a failure while the data is sent (WAIT_FOR_BUFFER, PREPARE_DATA_BLOCK, FEED / raw write) or a GET_UPDATE_STATUS that fails or reports the failed bit marks that image failed and every later image of the **same group** skipped. Other groups go on. A failed `cert-sw` stops the update at once. Because nothing but xloader/secondary may start while one of them is unfinished, a failed xloader/secondary would leave the scheduler waiting forever; the web version skips everything after it instead. A failing BEGIN_IMAGE_UPDATE or FINISH_IMAGE_UPDATE, or an image read error, stops the update at once. When the loop ends with any failed or skipped image, UPDATE_SW_REL is **not** sent and the failure path below runs.
 - Failure → `FUN_00410f38` dumps `/update/error_list` (proto ≥ 102), then `FINISH_UPDATE`. `SU_CANCEL_UPDATE` is sent only on Ctrl-C (proto ≥ 101), from inside the pending request, after which the same failure path runs.
 - Progress UI in the original: `[S] name [state progress% done / total kB  speed kB/s]`; states drawn as `_`,` `,`f`,`-`,`x`,`F` (failed).
 - Ordering rules in `FUN_004115b1`: images are looked up for the device's `product_code` + `hw_build` (6.3); a second lookup without device info only decides between `Image %s not present` and `Image %s not present for this HW (%s rev. %s)`. Flag `0x4000` (cert-sw) is OR'd in whenever any of the `0x38F` bits is selected: xloader/secondary (1), kernel (2), initfs (4), rootfs (8), moslo (0x80), mmc (0x100), tar (0x200). `config` is not included. When a rootfs is found, the tar bit is cleared, so tar is skipped (`Image tar skipped`).
@@ -324,8 +330,8 @@ Then the device re-enumerates. In `main`, after this reboot the tool re-opens th
 
 `/device/rd_mode` (string):
 - set: `+{flag,flag,…}` to add, `-{flag,…}` to remove, `-{*}` to clear all. Flags: `master`(0x1) `no-omap-wd`(0x2) `no-ext-wd`(0x4) `no-lifeguard-reset`(0x8) `serial-console`(0x10) `no-usb-timeout`(0x20) `sti-console`(0x40) `no-charging`(0x80) `force-power-key`(0x100).
-- get: reply parsed to a bitmask (`The device is in %s mode`, `R&D flags %s(0x%04x): %s`). Bit 0 (`master`) is the R&D mode; the other bits are printed with `(not effective) ` when it is clear.
-- `--enable-rd-mode` sends `+{master}`. `--disable-rd-mode` sends `-{*}`, which clears **all** flags, not just `master`. `--set-rd-flags=F` only adds `F`, `--clear-rd-flags=F` only removes `F`.
+- get: reply is a plain comma-separated flag list (no braces), parsed to a bitmask by `FUN_00409a23` (`The device is in %s mode`, `R&D flags %s(0x%04x): %s`). Bit 0 (`master`) is the R&D mode; the other bits are printed with `(not effective) ` when it is clear.
+- `--enable-rd-mode` sends `+{master}`. `--disable-rd-mode` sends `-{*}`, which clears **all** flags, not just `master`. `--set-rd-flags=F` only adds `F`, `--clear-rd-flags=F` only removes `F`. Both require a flag list, and `master` is refused (`FUN_004026b3` prints the possible flags and exits with 2), so there is no "clear all flags" without `--disable-rd-mode`.
 
 Over **NOLO**, `FUN_0040d1da(add, del, query)` sends `SET` value=`add` index 3, then `SET` value=`del` index 4 (each only when non-zero), and reads the flag word with `GET` index 3 (u16); the mode is its bit 0 (index 0 is never used). `--enable-rd-mode` = add `0x1`, `--disable-rd-mode` = delete `0xFFFF` (all flags), `--set-rd-flags=F` = add `F`, `--clear-rd-flags=F` = delete `F`. Querying always works; setting works only when the NOLO version is outside 1.5.9 – 1.6.4 (section 4). Otherwise the tool prints "Method is not supported in the current mode. Please, provide the APE flashing algorithm to set the R&D mode/flags." When a FIASCO with ape-algo is given, `main` boots it first and the flags are set over SU.
 
@@ -394,6 +400,8 @@ Per-image matching (`FUN_00406dc7`): images of the requested type are walked **i
 ---
 
 ## 7. Open questions (verify on hardware)
+
+0. Cold-flash timing. The original sends the boot message straight after opening the boot ROM device and rescans every 10 ms. The web version scans every 400 ms and waits for the user to click Flash (and confirm). The OMAP ROM waits only a short time for the peripheral boot message before trying the next boot device, so the window may be missed.
 
 1. Exact bytes of `FUN_00414428`/`FUN_00414330` Phonet interface matching for the N9 vs the N950. The structural rules in 2.1 come from the decompile; confirm with `lsusb -v` on both devices in NOLO→ape-algo mode.
 2. Aux-pipe use is decided in `FUN_00411344`: image group == 2 (eMMC rootfs, `mmc`), a raw data EP was found (`ctx+0x18 > 0`), and the image is not `tar`. Whether the N9/N950 SU server actually exposes the class-0xFF raw interface still needs a capture.
