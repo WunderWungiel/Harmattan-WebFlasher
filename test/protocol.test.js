@@ -254,6 +254,16 @@ test('NOLO identify (-i) reports product, version, R&D state', async () => {
   assert.deepEqual(rd.rdFlags, ['no-omap-wd', 'serial-console']);
 });
 
+test('NOLO status: non-zero is fine, one stall is retried, two fail', async () => {
+  const nolo = new FakeNolo();
+  const c = new NoloClient(nolo.transport());
+  assert.equal(await c.status(), 1);
+  nolo.statusStalls = 1;
+  assert.equal(await c.status(), 1);
+  nolo.statusStalls = 2;
+  await assert.rejects(c.status(), /stall/);
+});
+
 test('R&D over NOLO: allowed outside NOLO 1.5.9-1.6.4, refused inside; "-{*}" to disable over SU', async () => {
   const nolo = new FakeNolo(); // 0.1.43: outside the window
   const fl = () => new Flasher(new FakeHost([{ mode: 'nolo', transport: nolo.transport(), usb: { vid: 0x421, pid: 0x105 } }]));

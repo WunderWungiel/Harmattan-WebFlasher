@@ -153,7 +153,7 @@ Pure vendor control transfers on EP0 plus bulk OUT on EP2 for payloads. Interfac
 
 | bRequest | dir | wValue | wIndex | data | purpose |
 |----------|-----|--------|--------|------|---------|
-| `0x01` GET_STATUS | in | 0 | 0 | 4 bytes | poll until the word is 0 (retry once; `NOLO_REQ_GET_STATUS`) |
+| `0x01` GET_STATUS | in | 0 | 0 | 4 bytes | read once (one retry after a stall), exactly 4 bytes required, value not checked (`FUN_0040aceb`, `NOLO_REQ_GET_STATUS`). 0xFFFF polls until 0 |
 | `0x03` GET_NOLO_VERSION | in | 0 | 0 | 4 bytes | `major=v>>20&15, minor=v>>16&15, patch=v>>8&255`; `(v&0xFF) >= 2` = "Invalid flashing API version" |
 | `0x04` IDENTIFY | in | 0 | 0 | ≤512 | device info blocks (below) |
 | `0x05` ERROR_LOG | in | 0 | 0 | ≤0x800 | NUL-separated strings; sent after any failed request (`-ENODEV` style `-0x20` = pipe stall) |

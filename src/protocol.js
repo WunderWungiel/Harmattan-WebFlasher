@@ -379,14 +379,19 @@ export class NoloClient {
     return e;
   }
 
-  /** Poll status until the bootloader is idle. */
-  async waitReady() {
-    for (let i = 0; i < 50; i++) {
-      const b = await this.#in(NOLO.STATUS, 0, 0, 4);
-      if (b.length === 4 && view(b).getUint32(0, true) === 0) return;
-      await sleep(20);
+  /**
+   * Status word, read like the original: one retry after a stall, then
+   * exactly 4 bytes are required. The value itself is not checked.
+   */
+  async status() {
+    let b;
+    for (let i = 0; ; i++) {
+      try { b = await this.#in(NOLO.STATUS, 0, 0, 4); break; } catch (e) {
+        if (i > 0 || !(e instanceof TransportError) || e.code !== 'stall') throw e;
+      }
     }
-    throw new ProtocolError('NOLO did not become ready');
+    if (b.length !== 4) throw new ProtocolError(`Device returned ${b.length} status bytes (we want 4)`);
+    return view(b).getUint32(0, true);
   }
 
   /** Parse the IDENTIFY records {name[14], u16 len, data[len]}. */
@@ -436,7 +441,7 @@ export class NoloClient {
   /** `flasher -i` equivalent. */
   async init() {
     this.log('Initializing NOLO...');
-    await this.waitReady();
+    await this.status();
     const rec = await this.identifyRecords();
     if (!rec.prod_code) throw new ProtocolError('Product code not found');
     this.log(`Found device ${rec.prod_code}, hardware revision ${rec.hw_rev ?? '?'}`);

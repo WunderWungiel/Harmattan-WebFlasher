@@ -152,7 +152,7 @@ export class FakeNolo {
     this.bulk = [];
     this.booted = null;
     this.rd = { mode: 0, flags: 0 };
-    this.statusCalls = 0;
+    this.statusStalls = 0; // stall this many STATUS requests first
   }
   identifyBlob() {
     const rec = (name, val) => {
@@ -166,7 +166,9 @@ export class FakeNolo {
     return {
       controlIn: async (req, value, index, length) => {
         switch (req) {
-          case NOLO.STATUS: return Uint8Array.of(this.statusCalls++ < 1 ? 1 : 0, 0, 0, 0);
+          case NOLO.STATUS:
+            if (this.statusStalls > 0) { this.statusStalls--; throw new TransportError('stall', 'stall'); }
+            return Uint8Array.of(1, 0, 0, 0); // non-zero: the original does not wait for 0
           case NOLO.IDENTIFY: return this.identifyBlob();
           case NOLO.GET_VERSION: return Uint8Array.of(this.version & 255, (this.version >> 8) & 255, (this.version >> 16) & 255, (this.version >>> 24) & 255);
           case NOLO.GET_STRING: return toBytes(this.strings.get(selected) ?? '');
