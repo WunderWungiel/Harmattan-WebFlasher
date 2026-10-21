@@ -147,7 +147,6 @@ export class Flasher {
       Object.assign(info, su.info);
       try { info.battery = await su.batteryLevel(); this.log(`Battery level ${info.battery} %`); } catch { /* optional */ }
       try { info.rdMode = await su.getRdMode(); this.log(`R&D mode: ${info.rdMode || '(none)'}`); } catch { /* optional */ }
-      try { info.swRelease = await su.getParam('/version/sw_release'); this.log(`SW release: ${info.swRelease}`); } catch { /* optional */ }
       this.log(`Supported images: ${su.info.supported.join(' ')}`);
     }
     return info;
