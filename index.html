@@ -79,14 +79,19 @@
     <h2><span class="n">3</span> Actions</h2>
     <div class="row">
       <button id="btn-flash" class="primary" disabled>Flash selected</button>
-      <button id="btn-abort" disabled>Abort</button>
+      <button id="btn-abort" class="danger" disabled title="Highly dangerous: interrupting a flash can leave the phone unbootable">Abort</button>
       <button id="btn-reboot" disabled>Reboot</button>
       <button id="btn-boot" disabled title="NOLO only">Boot</button>
       <button id="btn-loadboot" disabled title="flasher -k kernel -l -b: NOLO only. Loads the kernel (and initfs and CMT images, if any) from the firmware or Advanced files into RAM and boots it once; nothing is flashed">Load &amp; boot kernel</button>
     </div>
+    <div id="abort-confirm" class="banner danger" role="alertdialog" aria-live="assertive" hidden>
+      <span id="abort-warning"></span>
+      <button id="btn-abort-yes" class="danger"></button>
+      <button id="btn-abort-no">Keep flashing</button>
+    </div>
     <div class="opts">
       <label><input type="checkbox" id="opt-reboot" checked> reboot after flashing</label>
-      <label title="Sets /update/mmc/no_preserve: the eMMC is repartitioned and its contents are not preserved. The original tool discourages this; prefer the Erase options."><input type="checkbox" id="opt-nopreserve"> repartition eMMC &mdash; contents are not preserved (<code>--no-preserve</code>)</label>
+      <label title="Sets /update/mmc/no_preserve: the eMMC is repartitioned and its contents are not preserved. The original tool discourages this; prefer the Erase options."><input type="checkbox" id="opt-nopreserve"> repartition eMMC &mdash; contents are not preserved (<code>--no-preserve</code>) &mdash; <b>NOT RECOMMENDED</b>, use Erase instead</label>
       <label><input type="checkbox" id="opt-skipbat"> skip battery check</label>
     </div>
     <details>

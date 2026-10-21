@@ -95,6 +95,7 @@ function refresh() {
   $('btn-flashmode').disabled = busy || !connected || flasher.session.mode === 'nolo' || flasher.session.mode === 'bootrom';
   $('btn-flash').disabled = busy || !connected || !selectedIndexes().size;
   $('btn-abort').disabled = !busy;
+  if (!busy && abortStep >= 0) showAbortStep(-1);
   $('btn-clear').disabled = !fiasco;
   $('file').disabled = busy;
   for (const i of document.querySelectorAll('#plain-files input[type=file]')) i.disabled = busy;
@@ -411,7 +412,28 @@ $('btn-flash').onclick = () => run('Flashing', async () => {
   resetProgress('flashing finished');
 }, { confirmText: () => flashWarning() });
 
-$('btn-abort').onclick = () => { flasher.abort(); log('Abort requested, finishing the current step...'); };
+// In-page, not confirm(): a modal dialog would stall the flash while the user reads it.
+const ABORT_WARNINGS = [
+  ['WARNING 1/3: Aborting is highly dangerous. Interrupting a flash can leave the phone with a half-written image that does not boot.', 'Abort anyway'],
+  ['WARNING 2/3: The phone may then only be recoverable by a full cold flash, if at all. Only abort if something has clearly gone wrong.', 'Really abort'],
+  ['WARNING 3/3: Last chance. Abort stops after the current step and cannot be undone.', 'ABORT NOW'],
+];
+let abortStep = -1;
+function showAbortStep(step) {
+  abortStep = step;
+  $('abort-confirm').hidden = step < 0;
+  if (step < 0) return;
+  [$('abort-warning').textContent, $('btn-abort-yes').textContent] = ABORT_WARNINGS[step];
+  $('btn-abort-no').focus();
+}
+$('btn-abort').onclick = () => showAbortStep(0);
+$('btn-abort-no').onclick = () => showAbortStep(-1);
+$('btn-abort-yes').onclick = () => {
+  if (abortStep < ABORT_WARNINGS.length - 1) return showAbortStep(abortStep + 1);
+  showAbortStep(-1);
+  flasher.abort();
+  log('Abort requested, finishing the current step...');
+};
 $('btn-reboot').onclick = () => run('Rebooting', async () => { await flasher.reboot(); await dropSession(); });
 $('btn-boot').onclick = () => run('Booting', async () => {
   const cmdline = prompt('Kernel command line (empty = default):', '') ?? null;
