@@ -139,9 +139,9 @@ Used with `-c`. Transport: bulk IN `0x81`, bulk OUT `0x01` on interface 0, alt 0
    | `0x6305` | HWID query (reply ≤32 bytes, printed as `Received %d bytes from 1st`) |
 
    After the 16-byte header the device replies with a 4-byte word: `0x00006FAA` means OK. A value whose low byte is `0xAA` is an error code (error = `-(word & 0xFFFF)`). Replies are read with 500 ms timeout for the header acknowledgement and 5000 ms after the payload. Payload is sent in chunks of at most `0x10000`; the device acknowledges once more with `0x6FAA`.
-4. **Sequence**: send 1st → HWID query (retry 4×, then drain pending input) → ping (retry 3×) → send secondary / ape-algo (retry 3×) → `Done`. Leaving cold flash (`-c` without a follow-up) sends the OMAP *memory boot* message `00 00 00 00` **[0xFFFF]**.
+4. **Sequence** (`-c`, `FUN_0040e30b`): read ASIC ID → send 2nd → ping (up to 4 tries) → send ape-algo (`0x6304`, up to 3 tries) → close. The 2nd and ape-algo payloads (and the 2nd length word) use the 128-byte-padded, `0xFF`-filled size (6.2). The separate "1st image" path (`FUN_0040e573`) sends 1st → waits 50 ms → HWID query (up to 4 tries, then drains pending input). Leaving cold flash (`-c` without a follow-up) sends the OMAP *memory boot* message `00 00 00 00` **[0xFFFF]**.
 
-Cold flash requires `2nd` and `ape-algo` images (`You have to supply the 2nd image for %s:%s`, `You have to supply the ape-algo image`).
+Cold flash requires `2nd` and `ape-algo` images (`You have to supply the 2nd image for %s:%s`, `You have to supply the ape-algo image`). Without device info, the first image of each type in the FIASCO is used (6.3).
 
 ---
 
@@ -175,9 +175,9 @@ Pure vendor control transfers on EP0 plus bulk OUT on EP2 for payloads. Interfac
 
 Identify blocks (`FUN_0040d5d8`): repeated `{ char name[14]; u16 len; u8 data[len] }` records. The record header is 16 bytes with the length at offset 14. `len` must be a multiple of 4. The tool reads `prod_code` (e.g. `RM-696`) and `hw_rev` (decimal string). `sw-release` / `kernel` / `initfs` / `nolo` / `content` versions come from `STRING`/`GET_STRING` with key `version:<name>` **[0xFFFF]**.
 
-**Quirk**: for NOLO `0x1509 ≤ version(patch field) ≤ 0x1604` (the code path at `FUN_0040b069`), the tool uses a different second pointer; the exact consequence is not recovered **[infer]**, probably an alternate send function.
+**Quirk**: when the NOLO version (patch field) is **outside** `0x1509…0x1604` (the code path at `FUN_0040b069`), the tool replaces a function pointer in the NOLO context (`ctx[7] = ctx[8]`); inside that window the default is kept. The exact consequence is not recovered **[infer]**, probably an alternate send function.
 
-**Loading ape-algo** (`FUN_0040b91d` with mask 0x1000): `SEND_IMAGE(0x42, blob)` → bulk write → done. The extra `usleep(100 ms)` after the data. Kernel/initfs identical (masks 2 / 4). CMT images (`cmt-2nd`, `cmt-algo`, `cmt-mcusw`) are sent in that order with the same procedure.
+**Loading ape-algo** (`FUN_0040b91d` with mask 0x1000): `SEND_IMAGE(0x42, blob)` → bulk write of the 128-byte-padded, `0xFF`-filled payload (6.2), in chunks of ≤ 0x20000 → done. The extra `usleep(100 ms)` after the data. Kernel/initfs identical (masks 2 / 4). CMT images (`cmt-2nd`, `cmt-algo`, `cmt-mcusw`) are sent in that order with the same procedure.
 
 **Change protocol** (`FUN_0040a4ea` with `param_5 = 1`): `BOOT(0x82, mode 0, cmdline " ")` (a single space). The device boots the freshly-loaded ape-algo, drops off the bus, and reappears with the Phonet interface. The host closes the NOLO handle, rescans with transport mask 4 (phonet) (the scan loop waits indefinitely until the interface appears), then runs SU init.
 
@@ -206,7 +206,7 @@ A response swaps bytes 1/2 and 6/7 and has the same transaction id. The host acc
 
 Response id = request id | `0x20` for every SU message. Special replies:
 - msg id `0xFF` from resource 0x88: "Server in failure mode: internal error or bad HW. Cannot continue".
-- msg id `0xF0` (COMMON_MESSAGE): CMT-originated notification; sub-id in payload byte 0 (logged at verbosity 1, ignored).
+- msg id `0xF0` (COMMON_MESSAGE): CMT-originated notification; sub-id in payload byte 0. Logged at verbosity 1, but the request still fails with `-4` (the same code as any unexpected reply; during the ping loop this triggers the ADL reboot). A reply whose transaction id or addresses don't match the request is rejected with `-EINVAL`, not skipped.
 
 Most replies carry a **status byte**. Position in the payload is per message (table below). Status codes: 0 ok, 1 unknown error, 2 invalid args, 3 invalid state, 4 out of memory, 5 object exists, 6 not supported, 7 not found, 8 too large, 9 unknown request, 10 security failure, 11 (0x0B) battery low. If the status byte is not the last byte, the remaining bytes are a NUL-terminated error string printed under `=== Detailed error info===`.
 
@@ -248,11 +248,12 @@ Default reply timeout 5000 ms. `FEED_DATA_BLOCK` waits 20000 ms. `WAIT_FOR_BUFFE
 3. Ping loop: `VERIFY_COMMS` with timeouts 250, 500, 1000, 2000, 4000, 5000 ms (doubling, capped at 5 s), up to 6 attempts (`Ping attempt %d (%d ms)`). A final failure with status `-4` → "Unknown response, trying ADL reboot".
 4. `GET_PARAMETER /update/protocol_version` → decimal string, e.g. `108`. Must satisfy `106 ≤ v ≤ 108`; `< 106` → "deprecated server" error; `> 108` → "You have to update the flasher client".
 5. `SET_PARAMETER /update/host_protocol_version = "108"`.
-6. `GET_PARAMETER /device/product_code` (`RM-696`/`RM-680`), `/device/hw_build`, `/update/supported_images` (comma list).
-7. Optional `SET_PARAMETER /update/trace_level`.
-8. Message printed: `Server implements softupd protocol version %d.%d`.
+6. `GET_PARAMETER /update/application_info` (`FUN_00412d98`), printed as `Server application: %s`, parsed as `%u.%u.%u`. Anything below **1.4.8**, or a failed read, aborts with "Refusing to continue: Image contains a deprecated server" ("may overwrite the certificates and render your device unusable").
+7. `GET_PARAMETER /device/product_code` (`RM-696`/`RM-680`), `/device/hw_build`, `/update/supported_images` (comma list).
+8. Optional `SET_PARAMETER /update/trace_level`.
+9. Message printed: `Server implements softupd protocol version %d.%d`.
 
-Protocol-version feature gates: `≥101` cancel update (0x65), `≥103` CAL read (0x67), `≥104` `no-preserve` (0x68), `≥105` erase (0x69), `≥100` CMT verify flag.
+Protocol-version feature gates: `≥101` cancel update (0x65), `≥102` error list after failure (`> 0x65`), `≥103` CAL read (0x67), `≥104` `no-preserve` (0x68), `≥105` erase (0x69), `≥100` CMT verify flag.
 
 ### 5.5 Parameters (GET/SET_PARAMETER keys)
 
@@ -262,11 +263,11 @@ Protocol-version feature gates: `≥101` cancel update (0x65), `≥103` CAL read
 | `/update/host_protocol_version` | set | host sends `108` |
 | `/update/application_info` | get | "Server application: %s" |
 | `/update/supported_images` | get | comma list matching section 0 |
-| `/update/error_list` | get | dumped after failure when proto ≥ 101 |
+| `/update/error_list` | get | dumped after failure when proto ≥ 102 |
 | `/update/trace_level` | set | |
 | `/update/no_battery_level_check` | set `1` | `-O…` |
 | `/update/cmt/verify` | set `1` | proto ≥ 100 unless `-O` skips |
-| `/update/cmt/perform_rfs` | set `1` | unless `no-cmt-rfs` |
+| `/update/cmt/perform_rfs` | set `1` | only when the option at `flasher_opts+4` is set; not sent by default |
 | `/update/mmc/no_preserve` | set `0`/`1` | proto ≥ 104 |
 | `/update/nand/part_table/version` | get | copied to ↓ |
 | `/device/nand/part_table/version` | set | repartition |
@@ -280,7 +281,7 @@ Protocol-version feature gates: `≥101` cancel update (0x65), `≥103` CAL read
 ```
 BEGIN_UPDATE
 [optional SET_PARAMETERs above]
-for each sub-image (scheduler FUN_00410d29 decides when each may start; exact ordering rules not fully recovered [infer]):
+for each sub-image (scheduler FUN_00410d29 decides when each may start, see below):
     BEGIN_IMAGE_UPDATE(blob)            -> pipe_id, block_size
     [if aux pipe wanted: SETUP_AUX_DATA_PIPE(pipe_id, "usb:raw")]
     repeat until all bytes sent:
@@ -291,16 +292,17 @@ for each sub-image (scheduler FUN_00410d29 decides when each may start; exact or
         else:        FEED_DATA_BLOCK messages of ≤ 0x8000 bytes each
         GET_UPDATE_STATUS(pipe_id) periodically  (≥250 ms apart)
     FINISH_IMAGE_UPDATE(pipe_id) once state == finished (0x10)
-UPDATE_SW_REL(blob)                      (only when at least one of kernel/rootfs/initfs written)
+UPDATE_SW_REL(blob)                      (only when xloader/secondary, kernel, initfs or rootfs was flashed: mask & 0xF)
 FINISH_UPDATE
 ```
 
 Notes:
-- The image payload length is padded up to a multiple of 128 bytes (`WARNING: Image '%s' not aligned`).
-- The aux ("raw") pipe is only used for eMMC-targeted images (`rootfs` for eMMC, `mmc`) when the server advertises it, never for `tar`. Raw bulk writes retry up to 10 times on `EAGAIN`; zero-length result = "Raw data transfer timed out".
-- Failure → `SU_CANCEL_UPDATE`, then `FUN_00410f38` dumps `/update/error_list`.
+- The image payload length is padded up to a multiple of 128 bytes (`WARNING: Image '%s' not aligned`); the padding is **`0xFF`** (6.2).
+- The aux ("raw") pipe is used for images in group 2 (eMMC rootfs, `mmc`) when a raw data EP was found, never for `tar`. Raw bulk writes retry up to 10 times on `EAGAIN`; zero-length result = "Raw data transfer timed out".
+- Failure → `FUN_00410f38` dumps `/update/error_list` (proto ≥ 102), then `FINISH_UPDATE`. `SU_CANCEL_UPDATE` is sent only on Ctrl-C (proto ≥ 101), from inside the pending request, after which the same failure path runs.
 - Progress UI in the original: `[S] name [state progress% done / total kB  speed kB/s]`; states drawn as `_`,` `,`f`,`-`,`x`,`F` (failed).
-- Ordering rules in `FUN_004115b1`: images are looked up for the device's `product_code` + `hw_build` first (`Image %s not present for this HW (%s rev. %s)`), then generic ones. Flag `0x4000` (cert-sw) is OR'd in whenever any of kernel/rootfs/mmc/config/tar bits (`0x38F`) is selected.
+- Ordering rules in `FUN_004115b1`: images are looked up for the device's `product_code` + `hw_build` (6.3); a second lookup without device info only decides between `Image %s not present` and `Image %s not present for this HW (%s rev. %s)`. Flag `0x4000` (cert-sw) is OR'd in whenever any of the `0x38F` bits is selected: xloader/secondary (1), kernel (2), initfs (4), rootfs (8), moslo (0x80), mmc (0x100), tar (0x200). `config` is not included. When a rootfs is found, the tar bit is cleared, so tar is skipped (`Image tar skipped`).
+- Scheduler (`FUN_00410d29`), table at `0x61fc80` (`{name, u32 mask, u32 group}`): groups are cert-sw 3, cmt-* 1, rootfs/mmc/tar 2, everything else 0. A OneNAND rootfs (no `0x33` layout block) is moved to group 0, an eMMC rootfs stays in group 2. Nothing starts until cert-sw has finished; nothing other than xloader/secondary (mask 1) starts while an xloader/secondary is unfinished; within a group, images run one after another in table order; different groups run in parallel. A sequential client gets the same constraints with the order cert-sw → xloader → secondary → cmt-2nd → cmt-algo → cmt-mcusw → kernel → moslo → rootfs → mmc → tar → config. `initfs` is not in the SU table.
 
 ### 5.7 ADL (sync mode) reboot **[bin]**
 
@@ -322,9 +324,10 @@ Then the device re-enumerates. In `main`, after this reboot the tool re-opens th
 
 `/device/rd_mode` (string):
 - set: `+{flag,flag,…}` to add, `-{flag,…}` to remove, `-{*}` to clear all. Flags: `master`(0x1) `no-omap-wd`(0x2) `no-ext-wd`(0x4) `no-lifeguard-reset`(0x8) `serial-console`(0x10) `no-usb-timeout`(0x20) `sti-console`(0x40) `no-charging`(0x80) `force-power-key`(0x100).
-- get: reply parsed to a bitmask (`The device is in %s mode`, `R&D flags %s(0x%04x): %s`).
+- get: reply parsed to a bitmask (`The device is in %s mode`, `R&D flags %s(0x%04x): %s`). Bit 0 (`master`) is the R&D mode; the other bits are printed with `(not effective) ` when it is clear.
+- `--enable-rd-mode` sends `+{master}`. `--disable-rd-mode` sends `-{*}`, which clears **all** flags, not just `master`. `--set-rd-flags=F` only adds `F`, `--clear-rd-flags=F` only removes `F`.
 
-Over **NOLO** the same flags are `SET` index 3/4 (u16 masks) and the master switch is index 0.
+Over **NOLO**, 3.12 can only *query*: `GET` index 3 (u16) returns the flag word, and the mode is its bit 0 (index 0 is not read). The NOLO context's setter slot is NULL (`FUN_0040d1da` is installed only as the query hook), so enabling/disabling R&D mode or setting flags fails with "Method is not supported in the current mode. Please, provide the APE flashing algorithm to set the R&D mode/flags." When a FIASCO with ape-algo is given, `main` boots it first and sets the flags over SU. (0xFFFF does write `SET` index 0/3/4 over NOLO; the Nokia tool does not.)
 
 Messages in the original that the log mirrors: `Server implements softupd protocol version 1.08`, `Found product RM-696 rev. 2102`, `Supported images: …`, `Image SW version …`, `Updating SW release`, `Success`.
 
@@ -375,7 +378,7 @@ Sections:
 `type[0] == 0xFF` marks the end of the list.
 
 Hash: XOR of all little-endian 16-bit words of the data **[0xFFFF `do_hash`]**. The shipping flasher does not recompute it on the Harmattan path **[infer]**.
-Alignment: `size` is rounded up to a multiple of 128 (`0x80`) before sending (see 5.6).
+Alignment: `size` is rounded up to a multiple of 128 (`0x80`) before sending, on every path (SU, NOLO, cold flash). The extra bytes are filled with **`0xFF`** (`fiasco_read_bytes`: `memset(..., 0xff, ...)`), not zero. Plain image files given on the command line are padded the same way.
 
 ### 6.3 "Raw subblock blob" sent to the device
 
@@ -386,15 +389,15 @@ Alignment: `size` is rounded up to a multiple of 128 (`0x80`) before sending (se
 
 **Difference from 0xFFFF**: `nolo.c` builds a reduced header (only the matching `0x32` entry, no `0x33`). The real Harmattan flasher sends *every* subblock of the sub-image, unfiltered. Use the real flasher's behaviour.
 
-Per-image matching: for the connected device (`product_code`, `hw_build`) the tool selects the sub-image whose `0x32` block lists that product and HW revision. If none matches, it falls back to a generic one (no `0x32`).
+Per-image matching (`FUN_00406dc7`): images of the requested type are walked **in file order** and the first match wins. An image matches if it has no `0x32` block (generic), or a `0x32` block whose product (`strncmp`, 16 bytes) equals the device's and which either lists no HW revisions (length exactly 16 = any revision) or lists the device's `hw_build` (8-byte slots). With no device info at all (e.g. cold flash), the first image of the type is returned. When the device-specific lookup fails but an image of that type exists, the tool prints `Image %s not present for this HW (%s rev. %s)` and skips it; there is no fallback to a non-matching image.
 
 ---
 
 ## 7. Open questions (verify on hardware)
 
 1. Exact bytes of `FUN_00414428`/`FUN_00414330` Phonet interface matching for the N9 vs the N950. The structural rules in 2.1 come from the decompile; confirm with `lsusb -v` on both devices in NOLO→ape-algo mode.
-2. The NOLO version window `0x1509…0x1604` quirk (section 4).
-3. Aux-pipe selection rule for eMMC images (`param+0x9c == 2` with a positive flag at `ctx+0x18`). Behaviour is clear, the trigger conditions need a capture.
+2. What the function pointer swapped outside the NOLO version window `0x1509…0x1604` actually does (section 4).
+3. Aux-pipe use is decided in `FUN_00411344`: image group == 2 (eMMC rootfs, `mmc`), a raw data EP was found (`ctx+0x18 > 0`), and the image is not `tar`. Whether the N9/N950 SU server actually exposes the class-0xFF raw interface still needs a capture.
 4. Whether BEGIN_IMAGE_UPDATE accepts blobs from FIASCO images unchanged for `config`/`tar`/`cert-sw`. Not exercised in the strings.
 5. Certificate and challenge/response commands (`common_*_cert`, NOLO `0x60-0x62`) are present but not reachable from the CLI of this build. They are out of scope for the web app.
 6. Timing: the original sleeps 10 ms between cold-flash writes, 50 ms after boot ROM transfers and 100 ms after NOLO image uploads. Keep these in `protocol.js`.
