@@ -96,8 +96,13 @@ export class Flasher {
   }
   #cold() { return new ColdFlash(this.session.transport, { log: this.log }); }
 
-  /** Phonet session with the SU handshake done. Handles sync mode (ADL) + re-enumeration. */
-  async #suReady() {
+  /**
+   * Phonet session with the SU handshake done. Like FUN_00412259, an
+   * unknown reply to the ping sends an ADL reboot into NOLO; with a FIASCO
+   * that carries ape-algo it is booted again (as main does), otherwise
+   * this returns null and the session is in NOLO mode.
+   */
+  async #suReady(fiasco = null) {
     if (SYNC_MODE_PIDS.includes(this.session.usb.pid)) {
       throw new ProtocolError('The phone is in Sync / PC Suite mode. Use Flash (it reboots the phone into flash mode first) or put the phone into flash mode manually.');
     }
@@ -106,7 +111,13 @@ export class Flasher {
       if (e instanceof SuError && e.timeout) {
         throw new ProtocolError('No softupd server answered. The phone is not running the APE algorithm; flash (or load ape-algo via NOLO) first.');
       }
-      throw e;
+      if (!e.adlReboot) throw e;
+      this.log(`${e.message}\nUnknown response, trying ADL reboot.`);
+      await su.adlReboot();
+      await this.#reenumerate(['nolo'], 'ADL reboot');
+      if (!fiasco?.images.some((i) => i.type === 'ape-algo')) return null;
+      await this.enterSu(fiasco);
+      return this.#suReady();
     }
     return su;
   }
@@ -166,6 +177,7 @@ export class Flasher {
       if (s.phonet) this.log(`ISI endpoints: IN ${s.phonet.inEp}, OUT ${s.phonet.outEp}, data interface ${s.phonet.dataInterface} alt ${s.phonet.dataAlt}`);
     } else {
       const su = await this.#suReady();
+      if (!su) return this.identify(); // ADL-rebooted into NOLO
       Object.assign(info, su.info);
       try { info.battery = await su.batteryLevel(); this.log(`Battery level ${info.battery} %`); } catch { /* optional */ }
       try { info.rdMode = await su.getRdMode(); this.log(`R&D mode: ${info.rdMode || '(none)'}`); } catch { /* optional */ }
@@ -234,7 +246,8 @@ export class Flasher {
     await this.enterSu(fiasco);
 
     this.#check();
-    const su = await this.#suReady();
+    const su = await this.#suReady(fiasco);
+    if (!su) throw new ProtocolError('APE algorithm has to be provided to flash all the subimages');
     const { product, hwBuild } = su.info;
     try {
       await this.#flashViaSu(su, fiasco, chosen, pickFrom, product, hwBuild, options);
@@ -480,8 +493,9 @@ export class Flasher {
     const s = this.session ?? await this.connect();
     // The original never talks to the boot ROM except to cold flash.
     if (s.mode === 'bootrom') throw new ProtocolError('Reboot is not available in cold-flash mode. Unplug the phone to leave it.');
-    if (s.mode === 'nolo') await this.#nolo().reboot();
-    else await this.#rebootSu(await this.#suReady());
+    const su = s.mode === 'nolo' ? null : await this.#suReady();
+    if (su) await this.#rebootSu(su);
+    else await this.#nolo().reboot(); // NOLO, also after an ADL reboot
     this.log('Success');
   }
 
@@ -528,7 +542,8 @@ export class Flasher {
     if (s.mode !== 'phonet') {
       throw new ProtocolError(`Method is not supported in the current mode. Please, provide the APE flashing algorithm to set the R&D ${what} (load a firmware file that contains ape-algo).`);
     }
-    return { su: await this.#suReady() };
+    const su = await this.#suReady(fiasco);
+    return su ? { su } : this.#rdTarget(fiasco, what); // ADL-rebooted into NOLO
   }
 
   async setRdMode(on, fiasco = null) {
@@ -565,7 +580,8 @@ export class Flasher {
     let s = this.session ?? await this.connect();
     if (s.mode !== 'phonet' && fiasco) s = await this.enterSu(fiasco);
     if (s.mode !== 'phonet') throw new ProtocolError('Erase not supported. Use APE flashing algorithm (load a firmware file that contains ape-algo).');
-    const su = await this.#suReady();
+    const su = await this.#suReady(fiasco);
+    if (!su) throw new ProtocolError('Erase not supported. Use APE flashing algorithm (load a firmware file that contains ape-algo).');
     this.aborted = false;
     await this.#batteryGate(su);
     await this.#erase(su, what, method);

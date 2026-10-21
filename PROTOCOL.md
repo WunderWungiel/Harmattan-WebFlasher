@@ -217,7 +217,8 @@ The original does exactly **one** bulk read per request (`FUN_00415b6c`). A repl
 
 Response id = request id | `0x20` for every SU message. Special replies:
 - msg id `0xFF` from resource 0x88: "Server in failure mode: internal error or bad HW. Cannot continue".
-- msg id `0xF0` (COMMON_MESSAGE): CMT-originated notification; sub-id in payload byte 0. Logged at verbosity 1, but the request still fails with `-4` (the same code as any unexpected reply; during the ping loop this triggers the ADL reboot). A reply whose transaction id or addresses don't match the request is rejected with `-EINVAL`, not skipped.
+- msg id `0xF0` (COMMON_MESSAGE): CMT-originated notification; sub-id in payload byte 0. Logged at verbosity 1, but the request still fails with `-4`.
+- Return codes of the reply check (`FUN_0040f170`): a wrong message id from resource 0x88 (other than `0xF0`, including `0xFF`) is `-10`; a COMMON_MESSAGE, a wrong id from another resource, a short or too long reply, or a non-zero status byte is `-4`; status 11 is `-9`; a timeout is `-6`. Only `-4` from the ping loop triggers the ADL reboot (5.4). A reply whose transaction id or addresses don't match the request is rejected with `-EINVAL`, not skipped.
 
 Most replies carry a **status byte**. Position in the payload is per message (table below). Status codes: 0 ok, 1 unknown error, 2 invalid args, 3 invalid state, 4 out of memory, 5 object exists, 6 not supported, 7 not found, 8 too large, 9 unknown request, 10 security failure, 11 (0x0B) battery low. If the status byte is not the last byte, the remaining bytes are a NUL-terminated error string printed under `=== Detailed error info===`.
 
@@ -256,7 +257,7 @@ Default reply timeout 5000 ms. `FEED_DATA_BLOCK` waits 20000 ms. `WAIT_FOR_BUFFE
 
 1. Template header `{media 0x1b, rdev 0, sdev 0x10, res 0x88, robj 0, sobj 0}`.
 2. If VID:PID is 0421:03D2 or 0421:051A → "Device is in Sync and connect mode, sending ADL reboot" (5.7), re-enumerate.
-3. Ping loop: `VERIFY_COMMS` with timeouts 250, 500, 1000, 2000, 4000, 5000 ms (doubling, capped at 5 s), up to 6 attempts (`Ping attempt %d (%d ms)`). Only a timeout leads to another attempt. The reply payload must echo the request exactly (min = max = request length, then `memcmp`, "data verify error"). Any unexpected reply (status `-4`) ends the loop at once → "Unknown response, trying ADL reboot".
+3. Ping loop: `VERIFY_COMMS` with timeouts 250, 500, 1000, 2000, 4000, 5000 ms (doubling, capped at 5 s), up to 6 attempts (`Ping attempt %d (%d ms)`). Only a timeout leads to another attempt. The reply payload must echo the request exactly (min = max = request length, then `memcmp`, "data verify error"). A `-4` reply (5.1) ends the loop at once → "Unknown response, trying ADL reboot" (5.7), for **any** PID, not only the sync-mode ones; `main` then waits for NOLO and continues as in section 4. A `-10` reply (wrong message from the SU server) or an echo mismatch (`-1`) just fails the init.
 4. `GET_PARAMETER /update/protocol_version` → decimal string, e.g. `108`. Must satisfy `106 ≤ v ≤ 108`; `< 106` → "deprecated server" error; `> 108` → "You have to update the flasher client".
 5. `SET_PARAMETER /update/host_protocol_version = "108"`.
 6. `GET_PARAMETER /update/application_info` (`FUN_00412d98`), printed as `Server application: %s`, parsed as `%u.%u.%u`. Anything below **1.4.8**, or a failed read, aborts with "Refusing to continue: Image contains a deprecated server" ("may overwrite the certificates and render your device unusable").

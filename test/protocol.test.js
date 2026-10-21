@@ -616,3 +616,24 @@ test('-k -l -b: kernel and initfs are loaded into RAM over NOLO and booted, noth
     /No kernel image/);
   assert.equal(bare.booted, null);
 });
+
+test('an unknown reply to the SU ping sends an ADL reboot, like FUN_00412259', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: [{ type: 'ape-algo', data: rnd(500, 1) }, { type: 'kernel', data: rnd(800, 2) }],
+  })) }]);
+  // A COMMON_MESSAGE (or a reply from another resource) is the original's -4: ADL reboot,
+  // NOLO, ape-algo is booted again and the flash goes on.
+  const bad = new FakeSuServer({ pingReply: { id: 0xf0, payload: Uint8Array.of(7) } });
+  const nolo = new FakeNolo();
+  const good = new FakeSuServer();
+  const host = new FakeHost([sessionFor(bad), { mode: 'nolo', transport: nolo.transport(), usb: { vid: 0x421, pid: 0x105 } }, sessionFor(good)]);
+  await new Flasher(host).flash(fi, new Set([1]), { reboot: false });
+  assert.deepEqual(bad.adl, [0x0d, 0x04]);
+  assert.deepEqual(nolo.booted, { mode: 0, cmdline: ' ' });
+  assert.deepEqual(good.images.map((i) => i.type), ['kernel']);
+
+  // A wrong reply from the SU server itself is -10: no ADL reboot.
+  const odd = new FakeSuServer({ pingReply: { id: 0x25 } });
+  await assert.rejects(new Flasher(new FakeHost([sessionFor(odd)])).flash(fi, new Set([1])), /got 0x25 from server/);
+  assert.deepEqual(odd.adl, []);
+});

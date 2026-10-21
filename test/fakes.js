@@ -8,7 +8,7 @@ const be64 = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBig
 
 /** An SU (softupd) server speaking ISI over a fake bulk pipe. */
 export class FakeSuServer {
-  constructor({ protocol = 108, appInfo = '1.4.8', product = 'RM-696', hwBuild = '2101', battery = 80, failImage = null, rdMode = '', rejectSet = [] } = {}) {
+  constructor({ protocol = 108, appInfo = '1.4.8', product = 'RM-696', hwBuild = '2101', battery = 80, failImage = null, rdMode = '', rejectSet = [], pingReply = null } = {}) {
     this.params = new Map([
       ['/update/protocol_version', String(protocol)],
       ['/update/application_info', appInfo],
@@ -31,6 +31,8 @@ export class FakeSuServer {
     this.rebooted = null;
     this.blockSize = 4096;
     this.seen = [];
+    this.pingReply = pingReply; // {id, res, payload}: answer the ping with this instead
+    this.adl = []; // ADL (resource 0x6f) message ids
   }
 
   #reply(req, id, payload) {
@@ -50,10 +52,13 @@ export class FakeSuServer {
     const req = isiParse(frame);
     const p = req.payload;
     this.seen.push(req.id);
+    if (req.res === 0x6f) { this.adl.push(req.id); return this.#reply(req, req.id | 0x20, Uint8Array.of(0)); }
     const ok = (extra = new Uint8Array(0)) => this.#reply(req, req.id | 0x20, concat(Uint8Array.of(0), extra));
     const dv = new DataView(p.buffer, p.byteOffset, p.byteLength);
     switch (req.id) {
-      case SU.VERIFY_COMMS: return this.#reply(req, 0x20, p);
+      case SU.VERIFY_COMMS:
+        if (this.pingReply) return this.#reply({ ...req, res: this.pingReply.res ?? req.res }, this.pingReply.id, this.pingReply.payload ?? new Uint8Array(0));
+        return this.#reply(req, 0x20, p);
       case SU.GET_PARAMETER: {
         const k = cstr(p);
         if (!this.params.has(k)) return this.#reply(req, 0x21, Uint8Array.of(7));

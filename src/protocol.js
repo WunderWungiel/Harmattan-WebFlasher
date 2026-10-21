@@ -624,17 +624,25 @@ export class SuClient {
       break;
     }
     const p = msg.payload;
+    // Errors marked `unexpected` are the ones FUN_0040f170 reports as -4
+    // (a wrong reply from the SU server itself is -10 instead).
     if (msg.id !== respId) {
-      if (msg.res === ISI.RES_SU && msg.id === SU.FAILURE) throw new SuError('Server in failure mode: internal error or bad HW. Cannot continue');
-      throw new SuError(`Unexpected reply: instead of ${name}_RESP got 0x${msg.id.toString(16)} from resource 0x${msg.res.toString(16)}`);
+      if (msg.res === ISI.RES_SU && msg.id !== SU.COMMON_MESSAGE) {
+        if (msg.id === SU.FAILURE) throw new SuError('Server in failure mode: internal error or bad HW. Cannot continue');
+        throw new SuError(`Unexpected reply: instead of ${name}_RESP got 0x${msg.id.toString(16)} from server`);
+      }
+      if (msg.id === SU.COMMON_MESSAGE && p.length) {
+        throw new SuError(`Unexpected reply: COMMON_MESSAGE likely from CMT (sub-msg id 0x${p[0].toString(16)})`, { unexpected: true });
+      }
+      throw new SuError(`Unexpected reply: instead of ${name}_RESP got 0x${msg.id.toString(16)} from resource 0x${msg.res.toString(16)}`, { unexpected: true });
     }
-    if (p.length < min) throw new SuError(`Short ${name}_RESP received (${p.length} bytes, want ${min}).`);
-    if (max >= 0 && p.length > max) throw new SuError(`Too long ${name}_RESP received (${p.length} bytes, want ${max}).`);
+    if (p.length < min) throw new SuError(`Short ${name}_RESP received (${p.length} bytes, want ${min}).`, { unexpected: true });
+    if (max >= 0 && p.length > max) throw new SuError(`Too long ${name}_RESP received (${p.length} bytes, want ${max}).`, { unexpected: true });
     if (statusIdx >= 0 && p[statusIdx] !== 0) {
       const code = p[statusIdx];
       let detail = '';
       if (statusIdx + 1 < p.length) detail = cstr(p.subarray(statusIdx + 1));
-      const err = new SuError(`${name}_REQ terminated with error code ${code}: ${SU_ERRORS[code] ?? 'Undefined error code'}`, { code, detail, batteryLow: code === 11 });
+      const err = new SuError(`${name}_REQ terminated with error code ${code}: ${SU_ERRORS[code] ?? 'Undefined error code'}`, { code, detail, batteryLow: code === 11, unexpected: code !== 11 });
       throw err;
     }
     return p;
@@ -653,6 +661,11 @@ export class SuClient {
 
   // ---- session
 
+  /**
+   * Like FUN_00411f6e only a timeout leads to another attempt. An
+   * `unexpected` error (the original's -4) makes the caller try an ADL
+   * reboot, as FUN_00412259 does.
+   */
   async ping(tries = 6) {
     let ms = 250;
     for (let i = 1; i <= tries; i++) {
@@ -676,7 +689,10 @@ export class SuClient {
   /** Handshake: ping, protocol versions, product info. */
   async init({ traceLevel = null } = {}) {
     this.log('Initializing softupd protocol...');
-    await this.ping();
+    try { await this.ping(); } catch (e) {
+      if (e.unexpected) e.adlReboot = true;
+      throw e;
+    }
     const v = parseInt(await this.getParam('/update/protocol_version'), 10);
     if (!Number.isFinite(v)) throw new SuError('Invalid server protocol version string');
     if (v < PROTOCOL_MIN) throw new SuError('Refusing to continue: Image contains a deprecated server.');
