@@ -90,6 +90,14 @@ test('FIASCO round trip, product matching, 128-byte padding', () => {
   assert.equal(pickImage(f, 'kernel', 'RM-696', '2102').size, 1000);
   assert.equal(pickImage(f, 'kernel', 'RM-680', '1000').size, 500);
   assert.equal(pickImage(f, 'kernel', 'RM-696', '9999'), null);
+  assert.equal(pickImage(f, 'kernel', 'RM-696', null), null);
+  assert.equal(pickImage(f, 'kernel', null, null).size, 1000); // no device info: first one
+  const anyRev = parseFiasco(buildFiasco({ images: [
+    { type: 'kernel', data: rnd(200, 4) },
+    { type: 'kernel', data: rnd(300, 5), products: [{ product: 'RM-696', hwrevs: [] }] },
+  ] }));
+  assert.equal(pickImage(anyRev, 'kernel', 'RM-696', '2101').size, 200); // file order wins
+  assert.equal(pickImage({ images: anyRev.images.slice(1) }, 'kernel', 'RM-696', '2101').size, 300);
   assert.equal(f.images[2].emmc, true);
   assert.equal(f.images[1].blob[0], 0x2e);
   assert.throws(() => parseFiasco(Uint8Array.of(1, 2, 3)));

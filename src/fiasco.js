@@ -160,16 +160,24 @@ export function mergeFiascos(list, extras = []) {
   };
 }
 
+/**
+ * Does `img` apply to this device? Same rules as the original: no product
+ * subblock = generic; a product entry without HW revisions covers every
+ * revision; otherwise the HW revision must be listed (and known).
+ */
 export const imageMatches = (img, product, hwrev) =>
-  img.products.some((pr) => pr.product === product && (hwrev == null || pr.hwrevs.includes(String(hwrev))));
+  !img.products.length ||
+  img.products.some((pr) => pr.product === product && (!pr.hwrevs.length || (hwrev != null && pr.hwrevs.includes(String(hwrev)))));
 
 /**
- * Choose the sub-image of `type` for this device: first one that lists the
- * product/HW revision, otherwise a generic one (no product subblock).
+ * Choose the sub-image of `type` for this device: the first one in file
+ * order that matches. With no device info (product == null, e.g. cold
+ * flash) the first image of that type is taken.
  */
 export function pickImage(fiasco, type, product, hwrev) {
   const same = fiasco.images.filter((i) => i.type === type);
-  return same.find((i) => imageMatches(i, product, hwrev)) ?? same.find((i) => !i.products.length) ?? null;
+  if (product == null) return same[0] ?? null;
+  return same.find((i) => imageMatches(i, product, hwrev)) ?? null;
 }
 
 /**
