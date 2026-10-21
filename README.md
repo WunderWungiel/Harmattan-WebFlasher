@@ -66,6 +66,14 @@ npm run serve        # python3 -m http.server 8000 --bind 127.0.0.1
 # open http://localhost:8000 in Chromium
 ```
 
+With Docker:
+
+```sh
+docker compose up -d --build     # port 8000, PORT=9000 to change
+```
+
+Plain HTTP works only when opened as `http://localhost`. From any other address, put it behind an HTTPS reverse proxy.
+
 Binding to `127.0.0.1` keeps it private. For another machine on your LAN you need HTTPS (for example `caddy file-server --listen :8443` with a locally trusted certificate such as one from `mkcert`), because a plain-HTTP LAN address is not a secure context.
 
 Supported browsers: Chromium-based (Chrome, Chromium, Edge, Brave, Opera). Firefox and Safari have no WebUSB.

@@ -1,0 +1,10 @@
+services:
+  webflasher:
+    build: .
+    image: harmattan-webflasher
+    ports:
+      - "${PORT:-8000}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
