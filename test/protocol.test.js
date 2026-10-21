@@ -323,6 +323,16 @@ test('cold flash from a FIASCO sends 0xFF-padded 2nd and ape-algo', async () => 
   assert.equal(rom.msgs[1].size, 3072);
 });
 
+test('cold flash refuses a FIASCO with several 2nd images', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: [{ type: '2nd', data: rnd(100, 1) }, { type: '2nd', data: rnd(100, 2) }, { type: 'ape-algo', data: rnd(100, 3) }, { type: 'kernel', data: rnd(100, 4) }],
+  })) }]);
+  const rom = new FakeBootRom();
+  const host = new FakeHost([{ mode: 'bootrom', transport: rom.transport(), usb: { vid: 0x451, pid: 0xd00e } }]);
+  await assert.rejects(new Flasher(host).flash(fi, new Set([3]), { reboot: false }), /supply 1st image/);
+  assert.equal(rom.out.length, 0);
+});
+
 test('reboot over SU sends the 16-byte state-change string', async () => {
   const srv = new FakeSuServer();
   const fl = new Flasher(new FakeHost([sessionFor(srv)]));

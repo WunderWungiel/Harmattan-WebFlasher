@@ -158,6 +158,11 @@ export class Flasher {
       s = this.session;
     }
     if (s.mode === 'bootrom') {
+      // With several 2nd images the original detects the HW by booting a
+      // "1st" image (HWID query) first; that path is not implemented here.
+      if (fiasco.images.filter((i) => i.type === '2nd').length > 1) {
+        throw new ProtocolError('When cold flashing, please supply 1st image OR specify hardware type (this FIASCO has several 2nd images; HW detection via the 1st image is not supported).');
+      }
       const second = pickImage(fiasco, '2nd', null, null);
       const ape = pickImage(fiasco, 'ape-algo', null, null);
       if (!second) throw new ProtocolError('You have to supply the 2nd image');

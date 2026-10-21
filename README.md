@@ -91,6 +91,7 @@ Supported browsers: Chromium-based (Chrome, Chromium, Edge, Brave, Opera). Firef
 | CAL backup (`SU_READ_CONFIG`), certificates, `--erase-*` options not listed in the UI | partially hidden CLI options | the protocol client has `readConfig` and erase; CAL backup and certificate commands have no UI. |
 | Parallel image programming | flashes MMC and NAND images concurrently | images are flashed one at a time (slower, possibly rejected by some server versions). |
 | Large files | streamed from disk | the FIASCO is read fully into memory, so a multi-GiB eMMC image needs matching RAM. |
+| Cold flash with several `2nd` images | boots the matching `1st` image, queries the HWID, then picks the `2nd`/`ape-algo` for that HW | not supported: refused with the original's "supply 1st image OR specify hardware type" error. A FIASCO with a single `2nd` works. |
 | Plain (non-FIASCO) images | `-k`, `-n`, `-r`, `-a` accept raw images | only FIASCO files are parsed. Use `fiasco-gen`/`0xFFFF` to wrap raw images first. |
 
 ## 5. Development
