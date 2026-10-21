@@ -483,3 +483,27 @@ test('NOLO R&D gate compares the whole version word >> 8, signed, like the origi
   assert.equal(at(0x80150901), true);  // negative after sar
   assert.equal(noloCanSetRd(null), false);
 });
+
+test('setup failures after BEGIN_UPDATE return at once; erase failures fetch the error list', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({ images: [{ type: 'kernel', data: rnd(512, 4) }] })) }]);
+  const cmt = new FakeSuServer({ rejectSet: ['/update/cmt/verify'] });
+  await assert.rejects(new Flasher(new FakeHost([sessionFor(cmt)])).flash(fi, new Set([0]), { reboot: false }), /error code 6/);
+  assert.ok(!cmt.finished);
+  assert.ok(!cmt.seen.includes(0x1f));
+  assert.equal(cmt.images.length, 0);
+
+  const er = new FakeSuServer();
+  er.eraseError = 1;
+  const before = () => er.seen.lastIndexOf(0x12);
+  await assert.rejects(new Flasher(new FakeHost([sessionFor(er)])).flash(fi, new Set([0]), { reboot: false, eraseMmc: 'secure' }), /error code 1/);
+  assert.ok(er.seen.indexOf(0x01, before()) > before()); // error list after BEGIN_ERASE
+  assert.ok(!er.seen.includes(0x03)); // no BEGIN_UPDATE
+  assert.ok(!er.finished);
+
+  const low = new FakeSuServer();
+  low.eraseError = 11;
+  const logs = [];
+  await assert.rejects(new Flasher(new FakeHost([sessionFor(low)]), { log: (m) => logs.push(m) }).erase('userdata'), /Battery low/);
+  assert.ok(logs.includes('BATTERY IS LOW. DEVICE IS NOW CHARGING.'));
+  assert.ok(logs.some((l) => /Charging battery, 80 % battery level \(10 % required\)/.test(l)));
+});

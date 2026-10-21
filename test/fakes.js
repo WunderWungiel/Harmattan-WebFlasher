@@ -113,7 +113,8 @@ export class FakeSuServer {
       case SU.UPDATE_SW_REL: this.swRel = p.slice(); return ok();
       case SU.FINISH_UPDATE: this.finished = true; return ok();
       case SU.DEVICE_STATE_CHANGE: this.rebooted = cstr(p); return ok();
-      case SU.BEGIN_ERASE: this.erased = (this.erased ?? []).concat(cstr(p)); return ok();
+      case SU.BEGIN_ERASE: if (this.eraseError) return this.#reply(req, 0x32, Uint8Array.of(this.eraseError));
+        this.erased = (this.erased ?? []).concat(cstr(p)); return ok();
       case SU.CANCEL_UPDATE: this.cancelled = true; return ok();
       default: return this.#reply(req, req.id | 0x20, Uint8Array.of(9));
     }

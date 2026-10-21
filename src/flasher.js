@@ -219,16 +219,6 @@ export class Flasher {
     } catch (e) {
       this.log(e instanceof Cancelled ? 'Cancelling update...' : `ERROR: ${e.message}`);
       if (e.detail) this.log(`=== Detailed error info=========\n${e.detail}\n================================`);
-      // Like the original: CANCEL_UPDATE only when the user aborts, then the
-      // error list, then FINISH_UPDATE to close an update that was begun.
-      if (e instanceof Cancelled && su.version >= 101) await su.cancel();
-      if (su.version > 101) {
-        try {
-          const list = await su.getParam('/update/error_list');
-          if (list) this.log(`Fetching error list:\n========================================\n${list}\n========================================`);
-        } catch { /* ignore */ }
-      }
-      if (su.updateActive) { try { await su.finishUpdate(); } catch { /* ignore */ } }
       throw e;
     }
     this.log(`Done in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
@@ -263,15 +253,14 @@ export class Flasher {
     if (options.eraseMmc && options.eraseUserData) {
       this.log('Warning: user data may reside on MMC. In that case the MMC is unnecessarily erased twice.');
     }
-    if (options.eraseMmc) await su.erase('mmc', options.eraseMmc === true ? 'secure' : options.eraseMmc);
-    if (options.eraseUserData) await su.erase('userdata', 'secure');
+    if (options.eraseMmc) await this.#erase(su, 'mmc', options.eraseMmc === true ? 'secure' : options.eraseMmc);
+    if (options.eraseUserData) await this.#erase(su, 'userdata', 'secure');
 
+    // Like the original, a failure from here up to the first image returns
+    // at once: no error list and no FINISH_UPDATE.
     this.log('Begin update');
     await su.beginUpdate().catch(async (e) => {
-      if (e.batteryLow) {
-        this.log('BATTERY IS LOW. DEVICE IS NOW CHARGING.');
-        this.log('Please, do not detach the USB cable. Just wait a few minutes and then retry.');
-      }
+      if (e.batteryLow) await this.#batteryLowMessage(su);
       throw e;
     });
     if (su.version >= 100) await su.setParam('/update/cmt/verify', '1');
@@ -288,6 +277,20 @@ export class Flasher {
     // A failed cert-sw stops at once. Nothing else may start before
     // xloader/secondary are done (the original would wait for a failed one
     // forever), so their failure skips everything after them.
+    try {
+      await this.#flashPlan(su, fiasco, plan);
+    } catch (e) {
+      // A failure once the images are under way: CANCEL_UPDATE only when the
+      // user aborts, then the error list, then FINISH_UPDATE (FUN_00410f38).
+      if (e instanceof Cancelled && su.version >= 101) await su.cancel();
+      await this.#errorList(su);
+      try { await su.finishUpdate(); } catch { /* ignore */ }
+      throw e;
+    }
+    await su.finishUpdate();
+  }
+
+  async #flashPlan(su, fiasco, plan) {
     const notFlashed = [];
     const failedGroups = new Set();
     let skipRest = false;
@@ -309,7 +312,32 @@ export class Flasher {
       this.log('Updating SW release');
       try { await su.updateSwRelease(fiasco.swBlob); } catch (e) { this.log(`SW release update failed: ${e.message}`); }
     }
-    await su.finishUpdate();
+  }
+
+  /** `/update/error_list`, fetched after a failure (protocol >= 1.02). */
+  async #errorList(su) {
+    if (su.version <= 101) return;
+    try {
+      const list = await su.getParam('/update/error_list');
+      if (list) this.log(`Fetching error list:\n========================================\n${list}\n========================================`);
+    } catch { /* ignore */ }
+  }
+
+  /** What the original prints when BEGIN_UPDATE / BEGIN_ERASE report a low battery. */
+  async #batteryLowMessage(su) {
+    this.log('BATTERY IS LOW. DEVICE IS NOW CHARGING.');
+    try { this.log(`Charging battery, ${await su.batteryLevel()} % battery level (${MIN_BATTERY} % required)`); } catch { /* ignore */ }
+    this.log('Please, do not detach the USB cable. Just wait a few minutes and then retry.');
+  }
+
+  /** BEGIN_ERASE; on failure the original fetches the error list, or explains a low battery. */
+  async #erase(su, what, method) {
+    try { await su.erase(what, method); } catch (e) {
+      if (e.code === 'disconnected') throw e;
+      if (e.batteryLow) await this.#batteryLowMessage(su);
+      else await this.#errorList(su);
+      throw e;
+    }
   }
 
   async #batteryGate(su) {
@@ -478,7 +506,7 @@ export class Flasher {
     if (s.mode !== 'phonet') throw new ProtocolError('Erase not supported. Use APE flashing algorithm (load a firmware file that contains ape-algo).');
     const su = await this.#suReady();
     await this.#batteryGate(su);
-    await su.erase(what, method);
+    await this.#erase(su, what, method);
   }
 }
 
