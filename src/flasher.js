@@ -22,6 +22,27 @@ export const SU_FLASH_ORDER = ['cert-sw', 'cmt-2nd', 'cmt-algo', 'cmt-mcusw', 'x
  * until xloader/secondary are done; we flash one image at a time in that order.
  */
 const SU_SEQUENCE = ['cert-sw', 'xloader', 'secondary', ...SU_FLASH_ORDER.filter((t) => !['cert-sw', 'xloader', 'secondary'].includes(t))];
+/**
+ * --flash-only names (table at 0x6202a0) and the sub-image types each one
+ * selects. -M (--flash-only-mmc) is "mmc". initfs is accepted but has
+ * nothing to flash over SU.
+ */
+export const FLASH_ONLY = {
+  nolo: ['xloader', 'secondary'], kernel: ['kernel'], moslo: ['moslo'], initfs: ['initfs'],
+  rootfs: ['rootfs'], cmt: ['cmt-2nd', 'cmt-algo', 'cmt-mcusw'], mmc: ['mmc'], tar: ['tar'],
+};
+
+/**
+ * Indexes of the sub-images `--flash-only=names` would flash: those of the
+ * listed types, plus cert-sw when any of them is a main image (0x38f, so
+ * not for cmt alone). config is never included, as in the original.
+ */
+export function flashOnlySelection(images, names) {
+  const types = new Set(names.flatMap((n) => FLASH_ONLY[n] ?? []));
+  const withCert = [...types].some((t) => MAIN_TYPES.has(t));
+  return new Set(images.filter((i) => types.has(i.type) || (withCert && i.type === 'cert-sw')).map((i) => i.index));
+}
+
 const MAIN_TYPES = new Set(['xloader', 'secondary', 'kernel', 'initfs', 'rootfs', 'moslo', 'mmc', 'tar']);
 const SW_REL_TYPES = new Set(['xloader', 'secondary', 'kernel', 'initfs', 'rootfs']);
 const MIN_BATTERY = 10;

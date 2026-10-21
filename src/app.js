@@ -1,5 +1,5 @@
 // UI glue. All device logic lives in flasher.js / protocol.js.
-import { Flasher, SU_FLASH_ORDER, Cancelled } from './flasher.js';
+import { Flasher, SU_FLASH_ORDER, Cancelled, FLASH_ONLY, flashOnlySelection } from './flasher.js';
 import { parseFiasco, mergeFiascos, describeProducts, verifyImageHash, plainImage, PLAIN_TYPES, pickImage } from './fiasco.js';
 import { WebUsbHost } from './webusb.js';
 import { RD_FLAGS } from './protocol.js';
@@ -97,6 +97,8 @@ function refresh() {
   $('btn-clear').disabled = !fiasco;
   $('file').disabled = busy;
   for (const i of document.querySelectorAll('#plain-files input[type=file]')) i.disabled = busy;
+  for (const i of document.querySelectorAll('#flash-only input, #flash-only button')) i.disabled = busy;
+  syncFlashOnly();
   renderDevice();
 }
 
@@ -295,6 +297,7 @@ function renderImages() {
   const body = tbl.tBodies[0];
   body.textContent = '';
   tbl.hidden = !fiasco;
+  renderFlashOnly();
   $('fw-summary').textContent = fiasco ? `${fiasco.images.length} sub-images, SW ${fiasco.swVersion || '?'}` : '';
   if (!fiasco) return;
   for (const img of fiasco.images) {
@@ -322,6 +325,56 @@ function renderImages() {
     body.append(tr);
   }
 }
+// ---- Flash only (--flash-only=LIST, -M)
+
+const rowBoxes = () => [...document.querySelectorAll('#images input[type=checkbox]:not(:disabled)')];
+
+/** One checkbox per --flash-only name that has something to flash in the loaded firmware. */
+function renderFlashOnly() {
+  const box = $('flash-only-groups');
+  box.textContent = '';
+  const present = new Set(fiasco?.images.filter(flashable).map((i) => i.type) ?? []);
+  const names = Object.keys(FLASH_ONLY).filter((n) => FLASH_ONLY[n].some((t) => present.has(t)));
+  $('flash-only').hidden = !names.length;
+  for (const n of names) {
+    const lab = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.dataset.group = n;
+    cb.addEventListener('change', () => applyFlashOnly([...document.querySelectorAll('#flash-only-groups input:checked')].map((c) => c.dataset.group)));
+    lab.title = FLASH_ONLY[n].join(', ');
+    lab.append(cb, ` ${n}`);
+    box.append(lab);
+  }
+  syncFlashOnly();
+}
+
+/** Tick exactly the images `--flash-only=names` would flash. */
+function applyFlashOnly(names) {
+  const sel = flashOnlySelection(fiasco.images, names);
+  for (const c of rowBoxes()) c.checked = sel.has(+c.dataset.index);
+  log(`Flash only: ${names.join(',') || '(nothing)'}`, 1);
+  refresh();
+}
+
+/** Show each group as ticked, unticked or mixed, from the image rows. */
+function syncFlashOnly() {
+  if (!fiasco) return;
+  const boxes = rowBoxes();
+  for (const cb of document.querySelectorAll('#flash-only-groups input')) {
+    const types = FLASH_ONLY[cb.dataset.group];
+    const rows = boxes.filter((c) => types.includes(fiasco.images[+c.dataset.index]?.type));
+    const on = rows.filter((c) => c.checked).length;
+    cb.checked = rows.length > 0 && on === rows.length;
+    cb.indeterminate = on > 0 && on < rows.length;
+  }
+}
+
+$('btn-fo-mmc').onclick = () => applyFlashOnly(['mmc']);
+$('btn-fo-default').onclick = () => {
+  for (const c of rowBoxes()) c.checked = flashByDefault(fiasco.images[+c.dataset.index]);
+  refresh();
+};
+
 const fmtSize = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MiB` : `${Math.ceil(n / 1024)} kB`);
 const selectedIndexes = () => new Set([...document.querySelectorAll('#images input[type=checkbox]:checked')].map((c) => +c.dataset.index));
 

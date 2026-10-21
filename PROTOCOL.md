@@ -35,6 +35,8 @@ Image names recognised (table at `0x61fc80`) **[bin]**: `cert-sw`(0x4000) `cmt-2
 
 The flash mask starts at `0x3ff` (`0x402bce`): every main image and the CMT images, but not `config` (0x2000), which no option can select. `cert-sw` is added later (5.6).
 
+`--flash-only=LIST` (`FUN_004026e6`, names at `0x6202a0`): `nolo`(0x1, xloader/secondary) `kernel`(0x2) `moslo`(0x80) `initfs`(0x4) `rootfs`(0x8) `cmt`(0x70) `mmc`(0x100) `tar`(0x200), comma separated. An unknown name prints `Valid --flash-only options:` and exits with 2. `-M` (`--flash-only-mmc`) ORs in `mmc`. The list is ANDed with the flash mask (`0x40387c`), and `cert-sw` is then added only if a `0x38F` bit is left (5.6), so `--flash-only=cmt` flashes no cert-sw.
+
 ---
 
 ## 1. Operating flow (what `main` does) **[bin]**

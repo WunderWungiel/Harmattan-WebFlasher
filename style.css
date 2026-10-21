@@ -56,6 +56,8 @@ tr.loader td { color: var(--muted); }
 #log .e { color: #ff8b82; } #log .v { color: #7f8b97; } #log .s { color: #7ee787; }
 footer { padding-bottom: 32px; }
 @media (max-width: 560px) { .banner.error { margin-left: 16px; margin-right: 16px; } }
+.chips { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
+.chips label { font-family: ui-monospace, monospace; white-space: nowrap; }
 .plain { display: grid; grid-template-columns: max-content 1fr max-content; gap: 6px 10px; align-items: center; }
 .plain .name { font-family: ui-monospace, monospace; }
 .plain .sel { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

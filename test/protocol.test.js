@@ -5,7 +5,7 @@ import {
   SuClient, NoloClient, ColdFlash, noloCanSetRd, classifyUsbId, parseRdFlags, rdFlagNames, imageHash, SuError, hex, concat, TransportError,
 } from '../src/protocol.js';
 import { buildFiasco, parseFiasco, pickImage, mergeFiascos, verifyImageHash } from '../src/fiasco.js';
-import { Flasher } from '../src/flasher.js';
+import { Flasher, flashOnlySelection } from '../src/flasher.js';
 import { FakeSuServer, FakeNolo, FakeBootRom, FakeHost } from './fakes.js';
 
 const rnd = (n, seed = 1) => { const a = new Uint8Array(n); let x = seed; for (let i = 0; i < n; i++) { x = (x * 1103515245 + 12345) >>> 0; a[i] = x >>> 24; } return a; };
@@ -544,4 +544,25 @@ test('SU replies: a ping must echo exactly; a wrong receiver object is not ours'
 
   q.push(reply(0, 0x21, Uint8Array.of(0, 0x41), 5), reply(0, 0x21, Uint8Array.of(0, 0x42)));
   assert.equal(await new SuClient(t).getParam('/x'), 'B');
+});
+
+test('--flash-only selection: groups, cert-sw only with main images, never config', () => {
+  const images = ['cert-sw', 'xloader', 'secondary', 'cmt-2nd', 'cmt-mcusw', 'kernel', 'rootfs', 'mmc', 'tar', 'config', 'ape-algo']
+    .map((type, index) => ({ type, index }));
+  const types = (names) => [...flashOnlySelection(images, names)].map((i) => images[i].type);
+  assert.deepEqual(types(['mmc']), ['cert-sw', 'mmc']);
+  assert.deepEqual(types(['nolo', 'kernel']), ['cert-sw', 'xloader', 'secondary', 'kernel']);
+  assert.deepEqual(types(['cmt']), ['cmt-2nd', 'cmt-mcusw']);
+  assert.deepEqual(types(Object.keys({ nolo: 1, kernel: 1, moslo: 1, initfs: 1, rootfs: 1, cmt: 1, mmc: 1, tar: 1 })),
+    ['cert-sw', 'xloader', 'secondary', 'cmt-2nd', 'cmt-mcusw', 'kernel', 'rootfs', 'mmc', 'tar']);
+  assert.deepEqual(types([]), []);
+});
+
+test('flashing a --flash-only=cmt selection does not add cert-sw', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: ['cert-sw', 'cmt-2nd', 'kernel'].map((type, i) => ({ type, data: rnd(256, i + 1) })),
+  })) }]);
+  const srv = new FakeSuServer();
+  await new Flasher(new FakeHost([sessionFor(srv)])).flash(fi, flashOnlySelection(fi.images, ['cmt']), { reboot: false });
+  assert.deepEqual(srv.images.map((i) => i.type), ['cmt-2nd']);
 });

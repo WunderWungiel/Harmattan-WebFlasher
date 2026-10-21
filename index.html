@@ -56,6 +56,14 @@
         <tbody></tbody>
       </table>
     </div>
+    <div id="flash-only" class="row" hidden>
+      <span class="muted" title="Like flasher --flash-only=LIST: tick image groups to flash only those">Flash only (<code>--flash-only</code>):</span>
+      <span id="flash-only-groups" class="chips"></span>
+      <span class="row" style="margin: 0">
+        <button id="btn-fo-mmc" title="flasher -M / --flash-only-mmc">MMC only (<code>-M</code>)</button>
+        <button id="btn-fo-default" title="What the original flashes without --flash-only">Default</button>
+      </span>
+    </div>
     <details id="advanced">
       <summary>Advanced: individual image files</summary>
       <p class="muted small">Use a file instead of (or in addition to) the one inside the FIASCO. A supplied file replaces FIASCO images of the same type. <code>ape-algo</code> may be a FIASCO or a plain image.</p>
