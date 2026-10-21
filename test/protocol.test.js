@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  xloaderMessage, xloaderCrc32, isiBuild, isiParse, parseConfigDescriptor, findPhonetInterface,
+  xloaderMessage, xloaderCrc32, parseAsicId, isiBuild, isiParse, parseConfigDescriptor, findPhonetInterface,
   SuClient, NoloClient, ColdFlash, noloCanSetRd, classifyUsbId, parseRdFlags, rdFlagNames, imageHash, SuError, hex, concat, TransportError,
 } from '../src/protocol.js';
 import { buildFiasco, parseFiasco, pickImage, mergeFiascos, verifyImageHash } from '../src/fiasco.js';
@@ -506,4 +506,42 @@ test('setup failures after BEGIN_UPDATE return at once; erase failures fetch the
   await assert.rejects(new Flasher(new FakeHost([sessionFor(low)]), { log: (m) => logs.push(m) }).erase('userdata'), /Battery low/);
   assert.ok(logs.includes('BATTERY IS LOW. DEVICE IS NOW CHARGING.'));
   assert.ok(logs.some((l) => /Charging battery, 80 % battery level \(10 % required\)/.test(l)));
+});
+
+test('ASIC ID: length limits and HW variant like FUN_0040d80c', () => {
+  const id = (magic, { prefix = [0x14, 0x15, 0x01], hash = 0, len = 0x45 } = {}) => {
+    const b = new Uint8Array(len);
+    b.set([5, 1, 5, 1, 0x36, 0x30, 0x07, 2], 0); b.set(magic, 8); b.set(prefix, 0x23); b.fill(hash, 0x26, 0x3a);
+    return b;
+  };
+  assert.equal(parseAsicId(id([0x13, 2, 1, 1])).secure, 'EMU');
+  assert.equal(parseAsicId(id([0x13, 2, 1, 0])).secure, 'GP');
+  const hs = parseAsicId(id([0x13, 2, 1, 0], { hash: 0xab }));
+  assert.equal(hs.secure, 'HS');
+  assert.deepEqual(hs.warnings, []);
+  assert.deepEqual(parseAsicId(id([0x13, 2, 1, 0], { prefix: [0, 0, 0] })).warnings, ['Warning: unknown hash prefix in ASIC ID']);
+  assert.throws(() => parseAsicId(id([0x13, 2, 2, 0])), /Unknown magic in ASIC ID/);
+  assert.throws(() => parseAsicId(id([0x13, 2, 1, 1], { len: 0x44 })), /need at least 69 bytes/);
+  assert.equal(parseAsicId(id([0x13, 2, 1, 1], { len: 0x80 })).secure, 'EMU');
+  assert.throws(() => parseAsicId(id([0x13, 2, 1, 1], { len: 0x81 })), /too long/);
+});
+
+test('FIASCO header larger than 0x200 bytes is refused', () => {
+  const ok = buildFiasco({ name: 'x'.repeat(200), swVersion: 'y'.repeat(200) });
+  assert.ok(parseFiasco(ok));
+  const big = buildFiasco({ name: 'x'.repeat(250), swVersion: 'y'.repeat(250) });
+  assert.throws(() => parseFiasco(big), /header size mismatch/);
+});
+
+test('SU replies: a ping must echo exactly; a wrong receiver object is not ours', async () => {
+  const reply = (trid, id, payload, robj = 0) => {
+    const b = isiBuild({ trid, id, payload }); b[1] = 0x10; b[2] = 0x00; b[6] = robj; return b;
+  };
+  const q = [];
+  const t = { bulkOut: async () => {}, bulkIn: async () => q.shift() ?? null };
+  q.push(reply(0, 0x20, Uint8Array.of(1)));
+  await assert.rejects(new SuClient(t).ping(1), /Too long VERIFY_COMMS_RESP/);
+
+  q.push(reply(0, 0x21, Uint8Array.of(0, 0x41), 5), reply(0, 0x21, Uint8Array.of(0, 0x42)));
+  assert.equal(await new SuClient(t).getParam('/x'), 'B');
 });

@@ -122,7 +122,7 @@ export class Flasher {
     if (s.mode === 'bootrom') {
       // The boot ROM sends the ASIC ID once; keep it for a later cold flash.
       const asic = s.asic ?? (s.asic = await this.#cold().readAsicId());
-      this.log(`ASIC: ${asic.chip} revision ${asic.revision}, ${asic.secure}`);
+      this.log(`ASIC: ${asic.chip} revision ${asic.revision}, HW variant: ${asic.secure}`);
       this.log(`Root key hash: ${asic.rootKeyHash}`);
       Object.assign(info, { asic, note: 'Cold-flash mode only exposes the ASIC ID. Boot a 2nd-stage image for more.' });
     } else if (s.mode === 'nolo') {

@@ -206,16 +206,28 @@ export function xloaderMessage(cmd, payload = null) {
   return m;
 }
 
+export const ASIC_ID_MAX = 0x80;
+
+/**
+ * Parse and classify the boot ROM's ASIC ID like FUN_0040d80c: magic
+ * 13 02 01 01 = EMU; 13 02 01 00 = GP when the 20-byte root key hash is
+ * all zero, else HS; any other magic is refused. A wrong hash prefix only
+ * warns. `secure` holds the HW variant name the original prints.
+ */
 export function parseAsicId(b) {
-  if (b.length < 0x45) throw new ProtocolError(`ASIC ID too short (${b.length} bytes, need 69)`);
+  if (b.length < 0x45) throw new ProtocolError(`Got ${b.length} bytes... but need at least ${0x45} bytes. Something went wrong.`);
+  if (b.length > ASIC_ID_MAX) throw new ProtocolError(`ASIC ID too long (${b.length} bytes, at most ${ASIC_ID_MAX})`);
   const chipCode = hex(b.subarray(4, 7), '');
   const chip = { '343007': 'OMAP3430', '363007': 'OMAP3630' }[chipCode] ?? `unknown (${chipCode})`;
   const secureMagic = hex(b.subarray(8, 12), '');
-  const zero20 = b.subarray(0x26, 0x3a).every((x) => x === 0);
-  let secure = 'unknown';
-  if (secureMagic === '13020101') secure = 'type 3';
-  else if (secureMagic === '13020100') secure = zero20 ? 'unsigned (no root key)' : 'signed';
-  return { chip, revision: b[7], secure, rootKeyHash: hex(b.subarray(0x26, 0x3a), ''), raw: b };
+  const warnings = [];
+  let secure;
+  if (secureMagic === '13020101') secure = 'EMU';
+  else if (secureMagic === '13020100') {
+    if (hex(b.subarray(0x23, 0x26), '') !== '141501') warnings.push('Warning: unknown hash prefix in ASIC ID');
+    secure = b.subarray(0x26, 0x3a).every((x) => x === 0) ? 'GP' : 'HS';
+  } else throw new ProtocolError('Unknown magic in ASIC ID');
+  return { chip, revision: b[7], secure, warnings, rootKeyHash: hex(b.subarray(0x26, 0x3a), ''), raw: b };
 }
 
 export class ColdFlash {
@@ -228,7 +240,9 @@ export class ColdFlash {
     const b = await this.t.bulkIn(this.inEp, 0x100, 500);
     if (!b) throw new ProtocolError('Timeout waiting for ASIC ID (is the phone in cold-flash mode?)');
     this.log(`Got ${b.length} bytes.`);
-    return parseAsicId(b);
+    const asic = parseAsicId(b);
+    for (const w of asic.warnings) this.log(w);
+    return asic;
   }
 
   async #readWord(timeout) {
@@ -300,7 +314,7 @@ export class ColdFlash {
   async run({ second, apeAlgo, asic = null }) {
     if (asic) this.log('Using the ASIC ID read earlier.');
     else asic = await this.readAsicId();
-    this.log(`ASIC: ${asic.chip} rev ${asic.revision}, ${asic.secure}`);
+    this.log(`ASIC: ${asic.chip} rev ${asic.revision}, HW variant: ${asic.secure}`);
     await this.sendSecondStage(second);
     await this.ping();
     let last;
@@ -598,7 +612,7 @@ export class SuClient {
       if (!b) throw new SuError(`${name}_REQ timed out.`, { timeout: true });
       if (!b.length) continue;
       msg = isiParse(b);
-      if (msg.trid !== trid || msg.sdev !== ISI.DEV_PHONE || msg.rdev !== ISI.DEV_PC) {
+      if (msg.trid !== trid || msg.sdev !== ISI.DEV_PHONE || msg.rdev !== ISI.DEV_PC || msg.robj !== 0) {
         if (msg.id === SU.COMMON_MESSAGE) this.log(`Unexpected reply: COMMON_MESSAGE likely from CMT (sub-msg id 0x${(msg.payload[0] ?? 0).toString(16)})`, 1);
         continue;
       }
@@ -638,7 +652,8 @@ export class SuClient {
     let ms = 250;
     for (let i = 1; i <= tries; i++) {
       this.log(`Ping attempt ${i} (${ms} ms)`);
-      try { await this.request(SU.VERIFY_COMMS, new Uint8Array(0), { timeout: ms, min: 0, statusIdx: -1 }); return; } catch (e) {
+      // The reply must echo the (empty) request exactly: min = max = 0.
+      try { await this.request(SU.VERIFY_COMMS, new Uint8Array(0), { timeout: ms, min: 0, max: 0, statusIdx: -1 }); return; } catch (e) {
         if (!e.timeout) throw e;
       }
       ms = Math.min(ms * 2, 5000);

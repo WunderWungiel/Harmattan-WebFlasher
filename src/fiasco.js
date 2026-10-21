@@ -19,7 +19,8 @@ export function parseFiasco(input) {
 
   const hdrLen = dv.getUint32(1);
   const hdrEnd = 5 + hdrLen;
-  if (hdrLen < 4 || hdrEnd > u8.length) throw new ProtocolError('FIASCO image header size mismatch');
+  // The original also caps the header at 0x200 bytes (FUN_0040643f).
+  if (hdrLen < 4 || hdrEnd > u8.length || hdrEnd > 0x200) throw new ProtocolError('FIASCO image header size mismatch');
 
   const count = dv.getUint32(5);
   let p = 9;
