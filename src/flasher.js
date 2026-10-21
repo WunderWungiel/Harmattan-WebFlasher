@@ -287,7 +287,8 @@ export class Flasher {
     this.log(`Image ${img.type} (${img.size >> 10} kB)${img.version ? ` version ${img.version}` : ''}`);
     const { pipe, blockSize } = await su.beginImage(img.blob);
     this.log(`Pipe id ${pipe}, block size ${blockSize}`, 2);
-    const raw = img.type === 'rootfs' && img.emmc && su.rawOut > 0;
+    // Like the original: the aux pipe serves eMMC-group images (eMMC rootfs, mmc), never tar.
+    const raw = ((img.type === 'rootfs' && img.emmc) || img.type === 'mmc') && su.rawOut > 0;
     if (raw) { await su.setupAuxPipe(pipe); this.log('Using raw USB data pipe', 1); }
 
     const total = img.paddedSize;

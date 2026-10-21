@@ -174,6 +174,18 @@ test('full SU flash: kernel (feed) + rootfs (raw pipe) + reboot', async () => {
   assert.ok(logs.some((l) => /Success/.test(l)));
 });
 
+test('mmc goes over the raw pipe, tar and OneNAND rootfs do not', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: ['rootfs', 'mmc', 'tar'].map((type, i) => ({ type, data: rnd(512, i + 1) })),
+  })) }]);
+  const srv = new FakeSuServer();
+  await new Flasher(new FakeHost([sessionFor(srv, { raw: true })])).flash(fi, new Set([1, 2]), { reboot: false });
+  assert.deepEqual(srv.images.map((i) => [i.type, !!i.raw]), [['mmc', true], ['tar', false]]);
+  const one = new FakeSuServer();
+  await new Flasher(new FakeHost([sessionFor(one, { raw: true })])).flash(fi, new Set([0]), { reboot: false });
+  assert.deepEqual(one.images.map((i) => [i.type, !!i.raw]), [['rootfs', false]]);
+});
+
 test('SU flash order: cert-sw, then xloader, then CMT; tar dropped with rootfs', async () => {
   const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
     images: ['cmt-2nd', 'kernel', 'xloader', 'tar', 'rootfs', 'cert-sw'].map((type, i) => ({ type, data: rnd(256, i + 1) })),
