@@ -291,6 +291,19 @@ test('cold flash sequence', async () => {
   assert.equal(rom.msgs[1].size, 70000);
 });
 
+test('X-Loader ping is tried 4 times', async () => {
+  let pings = 0;
+  const t = {
+    bulkOut: async () => { pings++; },
+    bulkIn: async () => (pings < 4 ? null : Uint8Array.of(0xaa, 0x6f, 0, 0)),
+  };
+  await new ColdFlash(t).ping();
+  assert.equal(pings, 4);
+  pings = -10;
+  await assert.rejects(new ColdFlash(t).ping(), /No answer/);
+  assert.equal(pings, -6);
+});
+
 test('cold flash from a FIASCO sends 0xFF-padded 2nd and ape-algo', async () => {
   const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
     images: [

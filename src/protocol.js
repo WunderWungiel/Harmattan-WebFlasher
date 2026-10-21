@@ -274,7 +274,7 @@ export class ColdFlash {
     await sleep(50);
   }
 
-  async ping(tries = 3) {
+  async ping(tries = 4) {
     for (let i = 0; i < tries; i++) {
       this.log('Sending ping... ');
       try { await this.sendMessage(XLOADER.PING); this.log('pong.'); return; } catch (e) {
