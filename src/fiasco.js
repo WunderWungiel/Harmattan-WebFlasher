@@ -172,6 +172,16 @@ export function pickImage(fiasco, type, product, hwrev) {
   return same.find((i) => imageMatches(i, product, hwrev)) ?? same.find((i) => !i.products.length) ?? null;
 }
 
+/**
+ * `n` bytes of the image starting at `offset`, as the original reads them:
+ * the payload is rounded up to `paddedSize` and the tail is filled with 0xFF.
+ */
+export function readPadded(img, offset, n) {
+  const out = new Uint8Array(n).fill(0xff);
+  if (offset < img.size) out.set(img.data.subarray(offset, Math.min(offset + n, img.size)));
+  return out;
+}
+
 export function verifyImageHash(img) {
   return imageHash(img.data) === img.hash;
 }

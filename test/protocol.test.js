@@ -149,7 +149,7 @@ test('full SU flash: kernel (feed) + rootfs (raw pipe) + reboot', async () => {
   assert.deepEqual(srv.images.map((i) => i.type), ['cert-sw', 'kernel', 'rootfs']);
   const k = srv.imageBytes(1);
   assert.deepEqual(k.subarray(0, kernel.length), kernel);
-  assert.ok(k.subarray(kernel.length).every((b) => b === 0));
+  assert.ok(k.subarray(kernel.length).every((b) => b === 0xff));
   assert.equal(srv.images[2].raw, true);
   assert.deepEqual(new Uint8Array(srv.imageBytes(2).subarray(0, rootfs.length)), rootfs);
   assert.ok(srv.finished);

@@ -12,7 +12,7 @@ import {
   ColdFlash, NoloClient, SuClient, SuError, ProtocolError, TransportError,
   SYNC_MODE_PIDS, rdFlagNames, parseRdFlags, RD_FLAGS, sleep,
 } from './protocol.js';
-import { pickImage } from './fiasco.js';
+import { pickImage, readPadded } from './fiasco.js';
 
 /** Order in which sub-images are flashed over SU (same as the original's table). */
 export const SU_FLASH_ORDER = ['cert-sw', 'cmt-2nd', 'cmt-algo', 'cmt-mcusw', 'xloader', 'secondary', 'kernel', 'moslo', 'rootfs', 'mmc', 'tar', 'config'];
@@ -301,8 +301,7 @@ export class Flasher {
       if (!free) continue;
       const n = Math.min(free, maxChunk, total - sent);
       await su.prepareBlock(pipe, n);
-      const chunk = new Uint8Array(n);
-      chunk.set(img.data.subarray(sent, Math.min(sent + n, img.size)));
+      const chunk = readPadded(img, sent, n);
       if (raw) {
         for (let o = 0; o < n; o += 0x40000) await su.t.bulkOut(su.rawOut, chunk.subarray(o, Math.min(o + 0x40000, n)));
       } else {
