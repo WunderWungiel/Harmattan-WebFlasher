@@ -616,7 +616,8 @@ export class SuClient {
 
   async getParam(key) {
     const p = await this.request(SU.GET_PARAMETER, toBytes(key));
-    return dec.decode(p.subarray(1));
+    // The original treats the value as a C string; servers may NUL-terminate it.
+    return cstr(p.subarray(1));
   }
   async setParam(key, value) {
     await this.request(SU.SET_PARAMETER, concat(toBytes(key), Uint8Array.of(0), toBytes(value)), { min: 1, max: 1 });

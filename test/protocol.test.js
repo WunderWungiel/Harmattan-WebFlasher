@@ -128,6 +128,9 @@ test('SuClient init handshake and error mapping', async () => {
   const oldApp = new SuClient(new FakeSuServer({ appInfo: '1.4.7' }).transport());
   await assert.rejects(oldApp.init(), /deprecated server/);
   assert.ok(await new SuClient(new FakeSuServer({ appInfo: '2.0.0' }).transport()).init());
+  const nul = await new SuClient(new FakeSuServer({ product: 'RM-696\0', hwBuild: '2101\0', appInfo: '1.4.8\0' }).transport()).init();
+  assert.equal(nul.product, 'RM-696');
+  assert.equal(nul.hwBuild, '2101');
 });
 
 test('SuClient times out and reports it', async () => {
