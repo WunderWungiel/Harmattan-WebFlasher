@@ -566,3 +566,26 @@ test('flashing a --flash-only=cmt selection does not add cert-sw', async () => {
   await new Flasher(new FakeHost([sessionFor(srv)])).flash(fi, flashOnlySelection(fi.images, ['cmt']), { reboot: false });
   assert.deepEqual(srv.images.map((i) => i.type), ['cmt-2nd']);
 });
+
+test('-k -l -b: kernel and initfs are loaded into RAM over NOLO and booted, nothing flashed', async () => {
+  const nolo = new FakeNolo();
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: [
+      { type: 'kernel', data: rnd(3000, 21), products: [{ product: 'RM-680', hwrevs: ['1'] }] },
+      { type: 'kernel', data: rnd(5000, 22), products: [{ product: 'RM-696', hwrevs: ['2101'] }] },
+      { type: 'initfs', data: rnd(1000, 23) },
+      { type: 'rootfs', data: rnd(1000, 24) },
+    ],
+  })) }]);
+  const fl = new Flasher(new FakeHost([{ mode: 'nolo', transport: nolo.transport(), usb: { vid: 0x421, pid: 0x105 } }]));
+  await fl.loadAndBoot(fi, 'init=/sbin/preinit');
+  assert.deepEqual(nolo.sent.map((x) => x.req), [0x42, 0x42]);
+  assert.deepEqual(nolo.bulk[0].data.subarray(0, 5000), fi.images[1].data);
+  assert.deepEqual(nolo.booted, { mode: 0, cmdline: 'init=/sbin/preinit' });
+
+  const bare = new FakeNolo();
+  const none = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({ images: [{ type: 'rootfs', data: rnd(100, 1) }] })) }]);
+  await assert.rejects(new Flasher(new FakeHost([{ mode: 'nolo', transport: bare.transport(), usb: { vid: 0x421, pid: 0x105 } }])).loadAndBoot(none),
+    /No kernel image/);
+  assert.equal(bare.booted, null);
+});

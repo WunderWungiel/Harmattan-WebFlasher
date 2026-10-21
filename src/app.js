@@ -82,12 +82,13 @@ let files = [];
 const extras = new Map(); // type -> plain image supplied by the user
 let busy = false;
 
-const deviceButtons = ['btn-identify', 'btn-flashmode', 'btn-disconnect', 'btn-reboot', 'btn-boot', 'btn-rd-query', 'btn-rd-on', 'btn-rd-off', 'btn-rd-set', 'btn-rd-clear', 'btn-erase-mmc', 'btn-erase-user'];
+const deviceButtons = ['btn-identify', 'btn-flashmode', 'btn-disconnect', 'btn-reboot', 'btn-boot', 'btn-loadboot', 'btn-rd-query', 'btn-rd-on', 'btn-rd-off', 'btn-rd-set', 'btn-rd-clear', 'btn-erase-mmc', 'btn-erase-user'];
 
 function refresh() {
   const connected = !!flasher.session;
   for (const id of deviceButtons) $(id).disabled = busy || !connected;
   $('btn-boot').disabled = busy || flasher.session?.mode !== 'nolo';
+  $('btn-loadboot').disabled = $('btn-boot').disabled || !fiasco?.images.some((i) => i.type === 'kernel');
   $('btn-reboot').disabled = busy || !connected || flasher.session.mode === 'bootrom';
   $('btn-connect').disabled = busy;
   $('btn-wait').disabled = busy || connected;
@@ -416,6 +417,12 @@ $('btn-boot').onclick = () => run('Booting', async () => {
   const cmdline = prompt('Kernel command line (empty = default):', '') ?? null;
   if (cmdline === null) return;
   await flasher.boot(cmdline || null);
+  await dropSession();
+});
+$('btn-loadboot').onclick = () => run('Loading kernel', async () => {
+  const cmdline = prompt('Kernel command line (empty = default):', '') ?? null;
+  if (cmdline === null) return;
+  await flasher.loadAndBoot(fiasco, cmdline || null);
   await dropSession();
 });
 

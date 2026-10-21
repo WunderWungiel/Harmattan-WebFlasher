@@ -473,6 +473,26 @@ export class Flasher {
   }
 
   /**
+   * `flasher -k kernel [-n initfs] -l -b[cmdline]`, NOLO only: send the
+   * kernel (and initfs, if loaded) into RAM with SEND_IMAGE and boot it.
+   * Nothing is flashed; the next reboot starts the kernel in flash again.
+   */
+  async loadAndBoot(fiasco, cmdline = null) {
+    const s = this.session ?? await this.connect(['nolo']);
+    if (s.mode !== 'nolo') throw new ProtocolError('Loading a kernel into RAM needs NOLO (flash) mode');
+    const nolo = this.#nolo();
+    const info = await nolo.init();
+    const kernel = pickImage(fiasco, 'kernel', info.product, info.hwRev);
+    if (!kernel) throw new ProtocolError(`No kernel image for ${info.product} rev. ${info.hwRev}. Load a FIASCO with one or choose a kernel file.`);
+    for (const img of [kernel, pickImage(fiasco, 'initfs', info.product, info.hwRev)].filter(Boolean)) {
+      this.#check();
+      await nolo.sendImage(img, (d, t) => this.progress({ label: `${img.type} (NOLO)`, done: d, total: t, state: 'loading' }));
+    }
+    try { await nolo.boot(cmdline); } catch (e) { if (!(e instanceof TransportError)) throw e; }
+    this.log('Success');
+  }
+
+  /**
    * Where to change R&D settings, like the original: with a FIASCO that
    * carries ape-algo, boot it and use SU; otherwise NOLO can do it itself
    * when its version allows (noloCanSetRd). Returns {nolo} or {su}.

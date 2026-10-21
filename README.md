@@ -75,7 +75,8 @@ Supported browsers: Chromium-based (Chrome, Chromium, Edge, Brave, Opera). Firef
 1. Put the phone in a flashing USB mode (see the *Which USB mode is which?* hint in the UI). **Identify** is safe in all of them.
 2. **Connect…**, choose the device, **Identify**. Expect a NOLO version and product/hardware revision.
 3. Load FIASCO files (N9: main image plus eMMC image). Open **Sub-images** to untick what you don't want, or use the **Flash only** groups (`--flash-only`: `nolo` = xloader + secondary, `kernel`, `moslo`, `rootfs`, `cmt`, `mmc`, `tar`; `-M` = `mmc` alone; **Default** and **Clear** reset the selection), then **Flash selected**. `config` images are left unticked, because the original never flashes them.
-4. Whenever the phone reboots/re-enumerates (after loading the APE algorithm, after cold flash), the page waits for it. Chromium only remembers a device it has seen before when the device has a serial number. If the page shows *Select device…*, click it once and pick the new entry.
+4. To boot a kernel once without flashing it (`flasher -k zImage -l -b`), choose it under *Advanced: individual image files* → `kernel` (an `initfs` there is loaded too), then in NOLO mode click **Load & boot kernel** and give an optional command line. The kernel is sent into RAM and started; the next reboot starts the installed system again.
+5. Whenever the phone reboots/re-enumerates (after loading the APE algorithm, after cold flash), the page waits for it. Chromium only remembers a device it has seen before when the device has a serial number. If the page shows *Select device…*, click it once and pick the new entry.
 
 ## 4. Limitations vs. the native tool
 
@@ -86,7 +87,7 @@ Supported browsers: Chromium-based (Chrome, Chromium, Edge, Brave, Opera). Firef
 | USB timeouts | libusb timeouts cancel the transfer | WebUSB can't cancel a transfer. A timed-out bulk read stays in flight and is handed to the next read, so data isn't lost, but a *stuck* transfer can only be cleared by unplugging. |
 | `usb_reset`, device-by-bus selection (`-U`) | supported | not available. The browser's device chooser replaces `-U`. |
 | Zero-length packets | sent after 512-byte multiples | done explicitly in `SuClient`; the browser does not add them for you. |
-| Re-enumeration | rescans bus | needs a fresh permission when the new device has no serial number (see step 4 above). |
+| Re-enumeration | rescans bus | needs a fresh permission when the new device has no serial number (see step 5 above). |
 | Serial / `-S` cold flash | deprecated in the original too | not supported. USB only. |
 | CAL backup (`SU_READ_CONFIG`), certificates, `--erase-*` options not listed in the UI | partially hidden CLI options | the protocol client has `readConfig` and erase; CAL backup and certificate commands have no UI. |
 | Parallel image programming | flashes MMC and NAND images concurrently | images are flashed one at a time (slower, possibly rejected by some server versions). |

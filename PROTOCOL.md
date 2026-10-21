@@ -185,6 +185,8 @@ NOLO init (`FUN_0040b069`) fails, and nothing else is done over NOLO, when: the 
 
 **Loading ape-algo** (`FUN_0040b91d` with mask 0x1000): `SEND_IMAGE(0x42, blob)` → bulk write of the 128-byte-padded, `0xFF`-filled payload (6.2), in chunks of ≤ 0x20000 → done. The extra `usleep(100 ms)` after the data. Kernel/initfs identical (masks 2 / 4). CMT images (`cmt-2nd`, `cmt-algo`, `cmt-mcusw`) are sent in that order with the same procedure.
 
+**Load and boot** (`-k kernel [-n initfs] -l -b[cmdline]`): kernel then initfs are sent with the same SEND_IMAGE procedure, then `BOOT(0x82, mode 0, cmdline)`; nothing is written to flash. The web version does this as *Load & boot kernel*, NOLO only.
+
 **Change protocol** (`FUN_0040a4ea` with `param_5 = 1`): `BOOT(0x82, mode 0, cmdline " ")` (a single space). The device boots the freshly-loaded ape-algo, drops off the bus, and reappears with the Phonet interface. The host closes the NOLO handle, rescans with transport mask 4 (phonet) (the scan loop waits indefinitely until the interface appears), then runs SU init.
 
 ---
