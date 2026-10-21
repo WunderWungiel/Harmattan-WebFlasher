@@ -345,9 +345,11 @@ export class Flasher {
       if (img.type === 'xloader' || img.type === 'secondary') skipRest = true;
     }
     if (notFlashed.length) throw new SuError(`Update failed: ${notFlashed.join(', ')} not flashed`);
-    if (plan.some((i) => SW_REL_TYPES.has(i.type)) && fiasco.swBlob?.length) {
+    // Sent whenever a main image was flashed, like FUN_004115b1, even with
+    // an empty header when only plain image files were given.
+    if (plan.some((i) => SW_REL_TYPES.has(i.type))) {
       this.log('Updating SW release');
-      try { await su.updateSwRelease(fiasco.swBlob); } catch (e) { this.log(`SW release update failed: ${e.message}`); }
+      try { await su.updateSwRelease(fiasco.swBlob ?? new Uint8Array(0)); } catch (e) { this.log(`SW release update failed: ${e.message}`); }
     }
   }
 

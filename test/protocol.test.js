@@ -651,3 +651,12 @@ test('cert-sw follows the selection, even when the selected image is not for thi
   assert.deepEqual(srv.images.map((i) => i.type), ['cert-sw']);
   assert.ok(logs.some((l) => /Image kernel not present for this HW/.test(l)));
 });
+
+test('UPDATE_SW_REL is sent with an empty header when only plain images are flashed', async () => {
+  const { plainImage } = await import('../src/fiasco.js');
+  const fi = mergeFiascos([], [plainImage('kernel', rnd(1000, 3), 'zImage')]);
+  const srv = new FakeSuServer();
+  await new Flasher(new FakeHost([sessionFor(srv)])).flash(fi, new Set([0]), { reboot: false });
+  assert.deepEqual(srv.swRel, new Uint8Array(0));
+  assert.ok(srv.finished);
+});
