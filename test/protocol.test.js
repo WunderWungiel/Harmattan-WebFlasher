@@ -637,3 +637,17 @@ test('an unknown reply to the SU ping sends an ADL reboot, like FUN_00412259', a
   await assert.rejects(new Flasher(new FakeHost([sessionFor(odd)])).flash(fi, new Set([1])), /got 0x25 from server/);
   assert.deepEqual(odd.adl, []);
 });
+
+test('cert-sw follows the selection, even when the selected image is not for this HW', async () => {
+  const fi = mergeFiascos([{ file: 'x', fiasco: parseFiasco(buildFiasco({
+    images: [
+      { type: 'cert-sw', data: rnd(256, 1) },
+      { type: 'kernel', data: rnd(256, 2), products: [{ product: 'RM-680', hwrevs: [] }] },
+    ],
+  })) }]);
+  const srv = new FakeSuServer();
+  const logs = [];
+  await new Flasher(new FakeHost([sessionFor(srv)]), { log: (m) => logs.push(m) }).flash(fi, new Set([1]), { reboot: false });
+  assert.deepEqual(srv.images.map((i) => i.type), ['cert-sw']);
+  assert.ok(logs.some((l) => /Image kernel not present for this HW/.test(l)));
+});

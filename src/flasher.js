@@ -276,8 +276,10 @@ export class Flasher {
       if (su.info.supported.length && !su.info.supported.includes(type)) this.log(`WARNING: server does not list '${type}' as supported`);
       plan.push(img);
     }
-    // cert-sw is flashed together with the main images when present in the file.
-    if (!plan.some((i) => i.type === 'cert-sw') && plan.some((i) => MAIN_TYPES.has(i.type) || i.type === 'kernel')) {
+    // cert-sw is flashed together with the main images when present in the
+    // file. Like FUN_004115b1 this follows the selection (mask & 0x38f),
+    // before the images are looked up for this HW.
+    if (!plan.some((i) => i.type === 'cert-sw') && chosen.some((i) => MAIN_TYPES.has(i.type))) {
       const cert = pickImage(fiasco, 'cert-sw', product, hwBuild);
       if (cert) plan.unshift(cert);
     }
