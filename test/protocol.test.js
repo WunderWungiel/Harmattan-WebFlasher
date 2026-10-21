@@ -544,7 +544,10 @@ test('ASIC ID: length limits and HW variant like FUN_0040d80c', () => {
   assert.equal(hs.secure, 'HS');
   assert.deepEqual(hs.warnings, []);
   assert.deepEqual(parseAsicId(id([0x13, 2, 1, 0], { prefix: [0, 0, 0] })).warnings, ['Warning: unknown hash prefix in ASIC ID']);
-  assert.throws(() => parseAsicId(id([0x13, 2, 2, 0])), /Unknown magic in ASIC ID/);
+  // The original never refuses a cold flash over the magic.
+  const odd = parseAsicId(id([0x13, 2, 2, 0]));
+  assert.equal(odd.secure, 'unknown');
+  assert.deepEqual(odd.warnings, ['Unknown magic in ASIC ID']);
   assert.throws(() => parseAsicId(id([0x13, 2, 1, 1], { len: 0x44 })), /need at least 69 bytes/);
   assert.equal(parseAsicId(id([0x13, 2, 1, 1], { len: 0x80 })).secure, 'EMU');
   assert.throws(() => parseAsicId(id([0x13, 2, 1, 1], { len: 0x81 })), /too long/);

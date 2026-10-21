@@ -209,10 +209,12 @@ export function xloaderMessage(cmd, payload = null) {
 export const ASIC_ID_MAX = 0x80;
 
 /**
- * Parse and classify the boot ROM's ASIC ID like FUN_0040d80c: magic
- * 13 02 01 01 = EMU; 13 02 01 00 = GP when the 20-byte root key hash is
- * all zero, else HS; any other magic is refused. A wrong hash prefix only
- * warns. `secure` holds the HW variant name the original prints.
+ * Parse the boot ROM's ASIC ID. Only the length is checked, as in the
+ * original's cold flash (FUN_0040e6f8). The HW variant follows
+ * FUN_0040d80c: magic 13 02 01 01 = EMU; 13 02 01 00 = GP when the 20-byte
+ * root key hash is all zero, else HS; any other magic is 'unknown' with a
+ * warning. The original only classifies in its 1st-image HW detection and
+ * goes on even then, so nothing here stops a cold flash.
  */
 export function parseAsicId(b) {
   if (b.length < 0x45) throw new ProtocolError(`Got ${b.length} bytes... but need at least ${0x45} bytes. Something went wrong.`);
@@ -226,7 +228,10 @@ export function parseAsicId(b) {
   else if (secureMagic === '13020100') {
     if (hex(b.subarray(0x23, 0x26), '') !== '141501') warnings.push('Warning: unknown hash prefix in ASIC ID');
     secure = b.subarray(0x26, 0x3a).every((x) => x === 0) ? 'GP' : 'HS';
-  } else throw new ProtocolError('Unknown magic in ASIC ID');
+  } else {
+    warnings.push('Unknown magic in ASIC ID');
+    secure = 'unknown';
+  }
   return { chip, revision: b[7], secure, warnings, rootKeyHash: hex(b.subarray(0x26, 0x3a), ''), raw: b };
 }
 

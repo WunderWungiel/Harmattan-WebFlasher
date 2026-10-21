@@ -116,7 +116,8 @@ Used with `-c`. Transport: bulk IN `0x81`, bulk OUT `0x01` on interface 0, alt 0
    - `[12..14]=12 15 01` 2nd ID
    - `[35..37]=14 15 01` root key hash
    - `[58..60]=15 09 01` checksum
-   - `FUN_0040d80c` classifies the secure-mode magic: `13 02 01 01` → 3 (EMU); `13 02 01 00` → 1 (GP) when the 20-byte root key hash at `[38..57]` is all zero, else 2 (HS); any other magic → "Unknown magic in ASIC ID" and an error. A hash prefix other than `14 15 01` only prints "Warning: unknown hash prefix in ASIC ID". The caller prints `HW variant: %s` from the name table at `0x61fb60` (`unknown`, `GP`, `HS`, `EMU`). `FUN_0040d93f` compares the 20-byte root key hash against two known tables (device type lookup).
+   - The `-c` path (`FUN_0040e6f8` via `FUN_0040db1f`) checks only the length (0x45..0x80) and hex-dumps the ID; it does **not** classify it.
+   - `FUN_0040d80c` classifies the secure-mode magic: `13 02 01 01` → 3 (EMU); `13 02 01 00` → 1 (GP) when the 20-byte root key hash at `[38..57]` is all zero, else 2 (HS); any other magic prints "Unknown magic in ASIC ID" and returns −1. A hash prefix other than `14 15 01` only prints "Warning: unknown hash prefix in ASIC ID". Its only caller is the 1st-image HW detection (`FUN_00409e09`), which prints `HW variant: %s` from the name table at `0x61fb60` (`unknown`, `GP`, `HS`, `EMU`), prints "Unknown HW variant" for anything else and carries on. `FUN_0040d93f` compares the 20-byte root key hash against two known tables (device type lookup). The web version shows the variant (`unknown` for other magics) and never stops on it.
 2. **Send 2nd stage ("1st image")**. Bytes sent, in order, with 10 ms sleeps between:
    - `02 00 03 f0` (OMAP peripheral boot message `0xF0030002`, little endian; stored at `0x419fa1`)
    - `u32 LE length`
